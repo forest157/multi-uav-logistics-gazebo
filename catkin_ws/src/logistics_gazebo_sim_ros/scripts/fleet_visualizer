@@ -4,17 +4,19 @@ import rospy
 from geometry_msgs.msg import Point, PoseStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim.scenes import SCALE, SCENES, metric_xy
+from logistics_gazebo_sim_ros.fleet_config import indexed_palette, line_spawn_offsets, validate_vehicle_count
 
-SPAWNS = [(-42.0,-40.0),(-40.0,-40.0),(-38.0,-40.0)]
-COLORS = [(0.1,0.6,1.0),(0.1,1.0,0.3),(1.0,0.5,0.1)]
 
 class Visualizer:
     def __init__(self):
         self.scene = SCENES[int(rospy.get_param("~scene_id",0))]
+        self.count=validate_vehicle_count(rospy.get_param("~vehicle_count",3))
         sx, sy = float(rospy.get_param("~spawn_x",-40.0)), float(rospy.get_param("~spawn_y",-40.0))
-        self.spawns=[(sx-3.0,sy),(sx,sy),(sx+3.0,sy)]
-        self.poses, self.targets, self.trails = [None]*3, [None]*3, [[],[],[]]
-        for i in range(3):
+        spacing=float(rospy.get_param("~spawn_spacing_m",3.0))
+        self.spawns=[(sx+dx,sy+dy) for dx,dy in line_spawn_offsets(self.count,spacing)]
+        self.colors=indexed_palette(self.count)
+        self.poses, self.targets, self.trails = [None]*self.count, [None]*self.count, [[] for _ in range(self.count)]
+        for i in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
             rospy.Subscriber("/uav{}/target_pose".format(i),PoseStamped,self.target_cb,callback_args=i,queue_size=1)
         self.pub=rospy.Publisher("/fleet/markers",MarkerArray,queue_size=2,latch=True)
@@ -48,10 +50,10 @@ class Visualizer:
             arr=MarkerArray();arr.markers.extend(self.obstacle_markers())
             for i,p in enumerate(self.poses):
                 if p:
-                    m=self.marker(i,Marker.SPHERE,"vehicles");m.pose.position=p;m.scale.x=m.scale.y=0.8;m.scale.z=0.3;self.color(m,COLORS[i]);arr.markers.append(m)
-                    label=self.marker(10+i,Marker.TEXT_VIEW_FACING,"labels");label.pose.position=Point(p.x,p.y,p.z+1.0);label.scale.z=0.7;label.text="UAV{}".format(i);self.color(label,COLORS[i]);arr.markers.append(label)
-                    trail=self.marker(20+i,Marker.LINE_STRIP,"trails");trail.scale.x=0.12;trail.points=self.trails[i];self.color(trail,COLORS[i]);arr.markers.append(trail)
+                    m=self.marker(i,Marker.SPHERE,"vehicles");m.pose.position=p;m.scale.x=m.scale.y=0.8;m.scale.z=0.3;self.color(m,self.colors[i]);arr.markers.append(m)
+                    label=self.marker(10+i,Marker.TEXT_VIEW_FACING,"labels");label.pose.position=Point(p.x,p.y,p.z+1.0);label.scale.z=0.7;label.text="UAV{}".format(i);self.color(label,self.colors[i]);arr.markers.append(label)
+                    trail=self.marker(20+i,Marker.LINE_STRIP,"trails");trail.scale.x=0.12;trail.points=self.trails[i];self.color(trail,self.colors[i]);arr.markers.append(trail)
                 if self.targets[i]:
-                    t=self.marker(30+i,Marker.SPHERE,"targets");t.pose.position=self.targets[i];t.scale.x=t.scale.y=t.scale.z=0.35;self.color(t,COLORS[i],0.45);arr.markers.append(t)
+                    t=self.marker(30+i,Marker.SPHERE,"targets");t.pose.position=self.targets[i];t.scale.x=t.scale.y=t.scale.z=0.35;self.color(t,self.colors[i],0.45);arr.markers.append(t)
             self.pub.publish(arr);rate.sleep()
 if __name__=="__main__":rospy.init_node("fleet_visualizer");Visualizer().run()

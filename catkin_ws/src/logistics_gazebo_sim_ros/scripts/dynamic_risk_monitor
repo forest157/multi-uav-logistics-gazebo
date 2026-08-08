@@ -19,6 +19,8 @@ class DynamicRiskMonitor:
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
         self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
+        self.local_avoidance_algorithm = str(rospy.get_param(
+            "~local_avoidance_algorithm", "collective_offset"))
         sx = float(rospy.get_param("~spawn_x", -40.0))
         sy = float(rospy.get_param("~spawn_y", -40.0))
         spacing = float(rospy.get_param("~spawn_spacing_m", 3.0))
@@ -133,8 +135,8 @@ class DynamicRiskMonitor:
             self.pending_request=self.request_sequence
             request={"request_id":self.pending_request,"paths":paths,
                      "obstacles":self.obstacles,
-                     "options":{"horizon":self.horizon,
-                         "scene_id":self.scene_id,
+                     "options":{"algorithm":self.local_avoidance_algorithm,
+                         "horizon":self.horizon,"scene_id":self.scene_id,
                          "minimum_separation":self.minimum_separation}}
             self.request_pub.publish(json.dumps(request,separators=(",",":")))
             self.last_request_stamp=now
@@ -183,6 +185,7 @@ class DynamicRiskMonitor:
                 "minimum_clearance_m": nearest["minimum_clearance_m"],
                 "time_to_conflict_s": nearest["time_to_conflict_s"],
                 "fleet_separation":separation,
+                "local_avoidance_algorithm":self.local_avoidance_algorithm,
                 "avoidance":avoidance}
 
     def publish(self, report):

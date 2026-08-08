@@ -5,11 +5,12 @@ import json
 import rospy
 from std_msgs.msg import String
 
-from logistics_gazebo_sim_ros.dynamic_obstacles import plan_collective_avoidance
+from logistics_gazebo_sim_ros.local_avoidance import create_local_planner
 
 
 class Planner:
     def __init__(self):
+        self.algorithm=str(rospy.get_param("~algorithm","collective_offset"))
         self.pub=rospy.Publisher("/fleet/avoidance_plan",String,queue_size=1)
         rospy.Subscriber("/fleet/avoidance_request",String,self.callback,queue_size=1)
 
@@ -17,9 +18,10 @@ class Planner:
         payload={}
         try:
             payload=json.loads(message.data)
-            avoidance=plan_collective_avoidance(
-                payload["paths"],payload["obstacles"],
-                **payload.get("options",{}))
+            options=dict(payload.get("options",{}))
+            algorithm=options.pop("algorithm",self.algorithm)
+            avoidance=create_local_planner(algorithm).plan(
+                payload["paths"],payload["obstacles"],**options)
             result={"request_id":payload["request_id"],"avoidance":avoidance}
         except Exception as error:
             rospy.logerr("isolated avoidance planning failed: %s",error)

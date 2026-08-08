@@ -367,7 +367,11 @@ class OperatorPlugin(Plugin):
             if level=="STALE":text=value.get("message","等待动态障碍数据")
             else:text="{} | 最近 {} | 净空 {}m | 冲突倒计时 {}s".format(level,value.get("nearest_vehicle","-"),value.get("minimum_clearance_m","-"),value.get("time_to_conflict_s","无"))
             avoidance=value.get("avoidance") or {}
-            if avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
+            algorithm=avoidance.get("algorithm") or value.get("local_avoidance_algorithm")
+            if algorithm:text+=" | 算法 {}".format(algorithm)
+            if avoidance.get("viable") and avoidance.get("command_type")=="per_vehicle_velocity":
+                text+=" | ORCA速度建议 {} 架（影子模式）".format(len(avoidance.get("commands") or []))
+            elif avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
             elif level in ("WARNING","CRITICAL"):
                 summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}
                 reasons="、".join("{}×{}".format(names.get(key,key),count) for key,count in sorted(summary.items()))

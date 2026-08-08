@@ -7,9 +7,8 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header
 from mavros_msgs.msg import State
 from logistics_gazebo_sim.scenes import SCALE, SCENES, metric_xy
+from logistics_gazebo_sim_ros.fleet_config import line_spawn_offsets, validate_vehicle_count
 
-
-SPAWNS = [(-42.0, -40.0), (-40.0, -40.0), (-38.0, -40.0)]
 
 
 def box_distance(px, py, pz, x, y, width, depth, height):
@@ -36,13 +35,14 @@ def obstacle_distance(position, obstacle):
 
 class SafetyMonitor:
     def __init__(self):
-        self.count = rospy.get_param("~vehicle_count", 3)
+        self.count = validate_vehicle_count(rospy.get_param("~vehicle_count", 3))
         self.scene = SCENES[int(rospy.get_param("~scene_id", 0))]
         self.min_separation_limit = rospy.get_param("~min_separation", 1.5)
         self.min_clearance_limit = rospy.get_param("~min_obstacle_clearance", 1.0)
         self.max_tracking_error = rospy.get_param("~max_tracking_error", 1.0)
         sx, sy = float(rospy.get_param("~spawn_x", -40.0)), float(rospy.get_param("~spawn_y", -40.0))
-        self.spawns = [(sx-3.0,sy),(sx,sy),(sx+3.0,sy)]
+        spacing=float(rospy.get_param("~spawn_spacing_m",3.0))
+        self.spawns = [(sx+dx,sy+dy) for dx,dy in line_spawn_offsets(self.count,spacing)]
         self.poses, self.targets = [None]*self.count, [None]*self.count
         self.ready = [False] * self.count
         for i in range(self.count):
@@ -65,8 +65,9 @@ class SafetyMonitor:
         if any(p is None for p in self.poses) or any(t is None for t in self.targets):
             return None
         world = self.world_positions()
-        separation = min(math.dist(world[i], world[j]) for i in range(self.count)
-                         for j in range(i+1, self.count))
+        separation = (min(math.dist(world[i], world[j]) for i in range(self.count)
+                          for j in range(i+1, self.count))
+                      if self.count>1 else float("inf"))
         clearance = min(obstacle_distance(position, obstacle) for position in world
                         for obstacle in self.scene["obstacles"])
         errors = [math.sqrt((p.x-t.x)**2+(p.y-t.y)**2+(p.z-t.z)**2)
