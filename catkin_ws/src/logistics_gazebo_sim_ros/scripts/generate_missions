@@ -137,8 +137,12 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
 
     duration=profile["duration"]
     positions=profile["positions"].copy()
-    positions[:,0]-=start[0];positions[:,1]-=start[1]
     times=18.0+profile["times"]
+    from logistics_gazebo_sim_ros.formation_scheduler import build_formation_schedule
+    formation_schedule=build_formation_schedule(
+        scene_id,times,positions,formation,vehicle_count,spacing,
+        transition_seconds=3.0,preferred_offsets=cruise)
+    positions[:,0]-=start[0];positions[:,1]-=start[1]
     outbound_end=18.0+duration
     delivery_row_end=outbound_end+5
     delivery_lower_end=delivery_row_end+3
@@ -170,6 +174,7 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
                     "status":planner_status},
          "clearance_analysis":clearance_report,
          "phase_analysis":phase_analysis,
+         "formation_schedule":formation_schedule,
          "trajectory_parameterization":{
              "method":"toppra_3d","velocity_limit_mps":2.0,
              "acceleration_limit_mps2":1.0,
@@ -208,6 +213,7 @@ def main():
                 summary={"success":True,"scene_id":scene_id,"mission_path":output,
                          "clearance_analysis":cfg["clearance_analysis"],
                          "phase_analysis":cfg["phase_analysis"],
+                         "formation_schedule":{key:value for key,value in cfg["formation_schedule"].items() if key!="keys"},
                          "trajectory_parameterization":cfg["trajectory_parameterization"],
                          "stages":cfg["stages"]}
                 with open(args.report_json,"w",encoding="utf-8") as stream:
