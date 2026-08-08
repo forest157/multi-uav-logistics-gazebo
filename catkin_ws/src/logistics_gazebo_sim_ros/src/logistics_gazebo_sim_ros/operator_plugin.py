@@ -72,6 +72,10 @@ class OperatorPlugin(Plugin):
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
         sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget)
+        self.simulation_stop_requested=False
+        self.process.started.connect(self.simulation_process_started)
+        self.process.errorOccurred.connect(self.simulation_process_error)
+        self.process.finished.connect(self.simulation_process_finished)
         self.analysis_timer=QTimer(self.widget);self.analysis_timer.setSingleShot(True);self.analysis_timer.setInterval(700);self.analysis_timer.timeout.connect(self.start_analysis)
         self.analysis_timeout=QTimer(self.widget);self.analysis_timeout.setSingleShot(True);self.analysis_timeout.setInterval(20000);self.analysis_timeout.timeout.connect(self.analysis_timed_out)
         self.analysis_process.finished.connect(self.analysis_finished)
@@ -223,8 +227,6 @@ class OperatorPlugin(Plugin):
         except OSError:errors.append("无法检查临时磁盘")
         try:rospy.get_master().getPid()
         except Exception:errors.append("ROS master不可用")
-        active=self.active_runtime_processes()
-        if active:errors.append("检测到未清理的飞行任务进程：{}".format(",".join(str(item[0]) for item in active)))
         probe=socket.socket(socket.AF_INET,socket.SOCK_STREAM);probe.settimeout(.15)
         try:
             if probe.connect_ex(("127.0.0.1",11460))==0:errors.append("Gazebo端口11460已被占用")
@@ -272,6 +274,13 @@ class OperatorPlugin(Plugin):
         return "\u822a\u7ebf\u89c4\u5212\u5931\u8d25\uff1a\n"+text
     def launch_sim(self):
         if self.process.state()!=QProcess.NotRunning:QMessageBox.information(self.widget,"\u63d0\u793a","\u4eff\u771f\u5df2\u7ecf\u5728\u8fd0\u884c");return
+        active=self.active_runtime_processes()
+        if active:
+            pids=",".join(str(item[0]) for item in active)
+            self.state.setText("三机仿真已在运行")
+            QMessageBox.information(self.widget,"仿真已在运行",
+                "检测到正在运行的三机仿真（进程 {}），无需重复启动。\n可直接使用任务控制按钮。".format(pids))
+            return
         if self.valid_analysis_signature!=self.parameter_signature() or not self.analysis_mission or not os.path.isfile(self.analysis_mission):
             QMessageBox.warning(self.widget,"规划尚未就绪","当前参数还没有通过三维规划与净空分析，请等待分析完成或调整参数。");self.schedule_analysis();return
         preflight=self.preflight_errors()
@@ -279,7 +288,28 @@ class OperatorPlugin(Plugin):
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
         self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
-        self.process.start("setsid",["roslaunch"]+args);self.state.setText("\u89c4\u5212\u6210\u529f\uff0c\u4eff\u771f\u542f\u52a8\u4e2d")
+        self.simulation_stop_requested=False;self.start_sim.setEnabled(False)
+        self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
+        self.process.start("setsid",["roslaunch"]+args)
+    def simulation_process_started(self):
+        self.state.setText("启动命令已提交，Gazebo 与三机 PX4 正在加载…")
+        QMessageBox.information(self.widget,"仿真开始启动",
+            "启动命令已成功提交。\nGazebo 场景和三架 PX4 正在加载，请稍候。")
+    def simulation_process_error(self,_error):
+        self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
+        self.state.setText("仿真启动失败")
+        QMessageBox.critical(self.widget,"仿真启动失败",
+            "无法启动 roslaunch：{}\n请检查 ROS 环境和启动日志。".format(self.process.errorString()))
+    def simulation_process_finished(self,exit_code,_exit_status):
+        self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
+        if self.simulation_stop_requested:
+            self.state.setText("三机仿真已停止")
+        elif exit_code!=0:
+            self.state.setText("仿真异常退出（代码 {}）".format(exit_code))
+            QMessageBox.warning(self.widget,"仿真异常退出",
+                "Gazebo/PX4 启动进程已退出，返回代码 {}。\n请查看 roslaunch 日志。".format(exit_code))
+        else:self.state.setText("三机仿真已结束")
+        self.simulation_stop_requested=False
     def stop_simulation(self):
         if self.process.state()==QProcess.NotRunning:
             result=QProcess.execute("pkill",["-INT","-f",
@@ -290,7 +320,7 @@ class OperatorPlugin(Plugin):
             else:
                 self.state.setText("没有检测到运行中的三机仿真")
             return
-        self.state.setText("正在停止三机仿真…")
+        self.simulation_stop_requested=True;self.state.setText("正在停止三机仿真…")
         try:os.killpg(int(self.process.processId()),signal.SIGINT)
         except (OSError,ProcessLookupError):self.process.terminate()
         QTimer.singleShot(5000,self.force_stop_simulation)
