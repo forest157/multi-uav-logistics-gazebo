@@ -245,3 +245,82 @@ def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0
             "minimum_clearance_m":selected["minimum_clearance_m"],"candidates":evaluated,
             "reason":"safe collective offset found","static_validation":selected["static_validation"],
             "rejection_summary":rejection_summary}
+
+
+class AvoidanceExecution:
+    """Fail-safe state machine for a collectively validated xyz offset."""
+    def __init__(self, confirmation_s=0.8, apply_s=2.0, recover_s=2.0,
+                 candidate_tolerance=0.25):
+        self.confirmation_s=float(confirmation_s);self.apply_s=float(apply_s)
+        self.recover_s=float(recover_s);self.tolerance=float(candidate_tolerance)
+        self.reset()
+
+    def reset(self):
+        self.state="IDLE";self.candidate=None;self.candidate_since=None
+        self.active=np.zeros(3);self.start_offset=np.zeros(3)
+        self.target=np.zeros(3);self.transition_started=0.0
+        self.failure=None
+
+    def _same(self, first, second):
+        return first is not None and second is not None and (
+            np.linalg.norm(np.asarray(first)-np.asarray(second))<=self.tolerance)
+
+    def update(self, level, avoidance, now):
+        now=float(now);level=str(level).upper();avoidance=avoidance or {}
+        viable=bool(avoidance.get("viable"))
+        proposed=avoidance.get("selected_offset") if viable else None
+        constrained=bool((avoidance.get("static_validation") or {}).get(
+            "feasible", viable))
+        viable=viable and constrained and proposed is not None
+
+        if level in ("WARNING","CRITICAL"):
+            if not viable:
+                self.state="HOLD";self.failure=avoidance.get(
+                    "reason","avoidance candidate unavailable")
+                self.candidate=None;self.candidate_since=None
+                return self.command(now)
+            if not self._same(self.candidate, proposed):
+                if self.state in ("APPLYING","ACTIVE"):
+                    self.state="HOLD";self.failure="validated candidate changed during avoidance"
+                    return self.command(now)
+                self.candidate=np.asarray(proposed,dtype=float)
+                self.candidate_since=now
+                if self.state not in ("APPLYING","ACTIVE"):
+                    self.state="CONFIRMING"
+                return self.command(now)
+            if self.state=="CONFIRMING" and now-self.candidate_since>=self.confirmation_s:
+                self.state="APPLYING";self.start_offset=self.active.copy()
+                self.target=self.candidate.copy();self.transition_started=now
+            elif self.state=="ACTIVE" and not self._same(self.target,proposed):
+                self.state="APPLYING";self.start_offset=self.active.copy()
+                self.target=np.asarray(proposed,dtype=float);self.transition_started=now
+        elif level=="SAFE":
+            self.candidate=None;self.candidate_since=None
+            if self.state in ("APPLYING","ACTIVE","CONFIRMING"):
+                self.state="RECOVERING";self.start_offset=self.active.copy()
+                self.target=np.zeros(3);self.transition_started=now
+            elif self.state=="HOLD":
+                self.state="IDLE";self.failure=None;self.active=np.zeros(3)
+        elif self.state in ("APPLYING","ACTIVE"):
+            self.state="HOLD";self.failure="risk state stale during avoidance"
+
+        return self.command(now)
+
+    def command(self, now):
+        now=float(now)
+        if self.state=="APPLYING":
+            ratio=min(1.0,max(0.0,(now-self.transition_started)/max(.01,self.apply_s)))
+            ratio=ratio*ratio*(3.0-2.0*ratio)
+            self.active=self.start_offset+ratio*(self.target-self.start_offset)
+            if ratio>=1.0:self.state="ACTIVE"
+        elif self.state=="RECOVERING":
+            ratio=min(1.0,max(0.0,(now-self.transition_started)/max(.01,self.recover_s)))
+            ratio=ratio*ratio*(3.0-2.0*ratio)
+            self.active=self.start_offset*(1.0-ratio)
+            if ratio>=1.0:self.state="IDLE";self.active=np.zeros(3)
+        action=("HOLD" if self.state=="HOLD" else
+                "AVOID" if self.state in ("APPLYING","ACTIVE","RECOVERING")
+                else "WAIT")
+        return {"state":self.state,"action":action,
+                "offset":[round(float(v),3) for v in self.active],
+                "failure":self.failure}

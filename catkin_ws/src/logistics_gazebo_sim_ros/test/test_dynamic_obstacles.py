@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from logistics_gazebo_sim_ros.dynamic_obstacles import (
-    DynamicObstacleError, DynamicSafetyResponse, assess_timed_path, interpolate_timed_path,
+    DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_timed_path, interpolate_timed_path,
     obstacle_clearance, plan_collective_avoidance, predict_position, shifted_path)
 
 
@@ -102,6 +102,39 @@ class DynamicObstacleTest(unittest.TestCase):
         paths=[[[0.0,-40.0,-40.0,8.0],[10.0,-35.0,-40.0,8.0]]]
         result=plan_collective_avoidance(paths,[],candidate_offsets=[[0.0,0.0,0.0]],scene_id=0)
         self.assertTrue(result["viable"]);self.assertTrue(result["static_validation"]["feasible"])
+
+    def viable_avoidance(self,offset=(0.0,3.0,0.0)):
+        return {"viable":True,"selected_offset":list(offset),"static_validation":{"feasible":True}}
+
+    def test_avoidance_requires_confirmation_and_blends_offset(self):
+        execution=AvoidanceExecution(confirmation_s=1.0,apply_s=2.0,recover_s=2.0)
+        self.assertEqual(execution.update("WARNING",self.viable_avoidance(),0.0)["state"],"CONFIRMING")
+        self.assertEqual(execution.update("WARNING",self.viable_avoidance(),1.0)["state"],"APPLYING")
+        middle=execution.command(2.0);self.assertEqual(middle["action"],"AVOID")
+        self.assertAlmostEqual(middle["offset"][1],1.5,places=2)
+        self.assertEqual(execution.command(3.0)["state"],"ACTIVE")
+
+    def test_avoidance_recovers_smoothly_after_safe(self):
+        execution=AvoidanceExecution(confirmation_s=0.0,apply_s=1.0,recover_s=2.0)
+        execution.update("WARNING",self.viable_avoidance(),0.0);execution.update("WARNING",self.viable_avoidance(),0.0)
+        execution.command(1.0);self.assertEqual(execution.command(1.0)["state"],"ACTIVE")
+        self.assertEqual(execution.update("SAFE",{},1.0)["state"],"RECOVERING")
+        self.assertAlmostEqual(execution.command(2.0)["offset"][1],1.5,places=2)
+        self.assertEqual(execution.command(3.0)["state"],"IDLE")
+
+    def test_invalid_or_changed_candidate_falls_back_to_hold(self):
+        execution=AvoidanceExecution(confirmation_s=0.0,apply_s=1.0)
+        self.assertEqual(execution.update("CRITICAL",{"viable":False},0.0)["action"],"HOLD")
+        execution.reset();execution.update("WARNING",self.viable_avoidance(),0.0)
+        execution.update("WARNING",self.viable_avoidance(),0.0)
+        changed=execution.update("WARNING",self.viable_avoidance((0.0,-3.0,0.0)),0.2)
+        self.assertEqual(changed["action"],"HOLD")
+
+    def test_stale_during_active_avoidance_falls_back_to_hold(self):
+        execution=AvoidanceExecution(confirmation_s=0.0,apply_s=0.1)
+        execution.update("WARNING",self.viable_avoidance(),0.0);execution.update("WARNING",self.viable_avoidance(),0.0)
+        execution.command(0.1);self.assertEqual(execution.command(0.1)["state"],"ACTIVE")
+        self.assertEqual(execution.update("STALE",{},0.2)["action"],"HOLD")
 
 if __name__ == "__main__":
     unittest.main()

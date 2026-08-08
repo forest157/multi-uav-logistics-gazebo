@@ -31,7 +31,7 @@ class DynamicRiskMonitor:
         for index in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),
                              PoseStamped, self.pose_cb, callback_args=index, queue_size=1)
-            rospy.Subscriber("/uav{}/target_pose".format(index), PoseStamped,
+            rospy.Subscriber("/uav{}/nominal_target_pose".format(index), PoseStamped,
                              self.target_cb, callback_args=index, queue_size=1)
         rospy.Subscriber("/dynamic_obstacles/state", String,
                          self.obstacles_cb, queue_size=1)
