@@ -4,7 +4,7 @@ import rospy
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
 def move(proxy,name,x,y):
-    state=ModelState();state.model_name=name;state.reference_frame="world";state.pose.position.x=x;state.pose.position.y=y;state.pose.position.z=0.011;state.pose.orientation.w=1.0
+    state=ModelState();state.model_name=name;state.reference_frame="world";state.pose.position.x=x;state.pose.position.y=y;state.pose.position.z=-0.009;state.pose.orientation.w=1.0
     result=proxy(state)
     if not result.success:raise RuntimeError("{}: {}".format(name,result.status_message))
 if __name__=="__main__":
