@@ -44,8 +44,29 @@ roslaunch logistics_gazebo_sim_ros three_uav_mission.launch \
 
 ## 验收
 
-- 60 项 Python 测试通过。
+- 61 项 Python 测试通过。
 - 3D ORCA 覆盖正面对撞、移动障碍、速度上限和八机输出。
 - catkin 构建成功，无警告。
 - ROS 请求/响应验证要求返回 `algorithm=orca3d`、`command_type=per_vehicle_velocity`。
 - 中文 README 已从 reference 正确版本恢复为 UTF-8。
+
+## Gazebo 三机影子模式验收（2026-08-08）
+
+使用 scene 0、单鸟横穿、三架 PX4 SITL、`auto_start=true`、`local_avoidance_algorithm=orca3d` 和 `dynamic_avoidance_execution=false` 完整执行起飞、投递、返航与软降落。
+
+首轮测试发现 ORCA 球体未包含风险层安全缓冲，在风险净空约 0.35 m 时速度修正仍为零。该轮判定失败。修复后 ORCA 统一加入 0.5 m 安全缓冲和 0.5 m额外净空，并在输出后采样复核动态障碍净空。
+
+第二轮冷启动验收结果：
+
+- 任务在约 266.4 秒进入 `COMPLETE`；
+- 三架无人机最终均自动解除武装；
+- 捕获 68 个非零 ORCA 影子建议事件；
+- 首次有效事件最大速度修正 0.0856 m/s；
+- 首次事件预测机间距 5.8332 m、预测障碍净空 0.1371 m；
+- 所有已接受 ORCA 建议的预测障碍净空保持非负，观测最低值 0.021 m；
+- 实际飞行最小机间距 2.876 m，高于 2.2 m 物理安全阈值；
+- 实际静态障碍最小净空 2.310 m；
+- 安全监测器未产生 ERROR；
+- ORCA 约束不足的候选正确返回不可行并交由现有减速/悬停层处理。
+
+验收 CSV：`~/.ros/logistics_runs/mission_20260808_170929.csv`。完整回归现为 61 项测试通过，catkin 构建无警告。
