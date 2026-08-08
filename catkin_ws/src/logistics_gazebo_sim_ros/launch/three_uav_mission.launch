@@ -22,6 +22,7 @@
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim_ros" type="dynamic_risk_monitor"
         name="dynamic_risk_monitor" output="screen">
     <param name="vehicle_count" value="3"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/>
+    <param name="horizon_s" value="8.0"/><param name="minimum_separation_m" value="3.0"/>
   </node>
   <include if="$(arg dynamic_obstacles)" file="$(find logistics_gazebo_sim_ros)/launch/dynamic_obstacles.launch">
     <arg name="config" value="$(arg dynamic_obstacle_config)"/>
@@ -31,6 +32,7 @@
     <param name="auto_start" value="$(arg auto_start)"/>
     <param name="dynamic_safety_enabled" value="$(arg dynamic_obstacles)"/>
     <param name="dynamic_avoidance_execution" value="$(arg dynamic_avoidance_execution)"/>
+    <param name="prediction_horizon_s" value="8.0"/>
     <param name="dynamic_warning_scale" value="0.35"/>
     <param name="dynamic_release_delay_s" value="2.0"/>
   </node>

@@ -193,6 +193,55 @@ def shifted_path(path, offset):
     return values
 
 
+def assess_fleet_separation(paths, horizon=8.0, sample_period=0.1,
+                            minimum_separation=3.0):
+    """Sample synchronized paths and enforce pairwise 3D separation."""
+    arrays = [np.asarray(path, dtype=float) for path in paths]
+    if not arrays:
+        raise DynamicObstacleError("at least one vehicle path is required")
+    for value in arrays:
+        if value.ndim != 2 or value.shape[1] != 4 or len(value) < 2:
+            raise DynamicObstacleError(
+                "timed path must contain at least two [t,x,y,z] rows")
+    start = max(float(value[0, 0]) for value in arrays)
+    end = min(min(float(value[-1, 0]) for value in arrays),
+              start + max(0.0, float(horizon)))
+    if end <= start:
+        raise DynamicObstacleError("fleet paths do not share a prediction window")
+    count = max(2, int(math.ceil(
+        (end - start) / max(0.01, float(sample_period)))) + 1)
+    closest = float("inf")
+    closest_pair = None
+    closest_time = None
+    first_conflict = None
+    required = float(minimum_separation)
+    for query_time in np.linspace(start, end, count):
+        positions = [interpolate_timed_path(value, query_time)
+                     for value in arrays]
+        for first in range(len(positions)):
+            for second in range(first + 1, len(positions)):
+                distance = float(np.linalg.norm(
+                    positions[first] - positions[second]))
+                if distance < closest:
+                    closest = distance
+                    closest_pair = ["uav{}".format(first),
+                                    "uav{}".format(second)]
+                    closest_time = float(query_time - start)
+                if distance < required and first_conflict is None:
+                    first_conflict = float(query_time - start)
+    return {
+        "safe": closest >= required,
+        "minimum_separation_m": (None if closest_pair is None
+                                  else round(closest, 3)),
+        "required_separation_m": required,
+        "closest_pair": closest_pair,
+        "closest_time_s": (None if closest_time is None
+                           else round(closest_time, 3)),
+        "time_to_conflict_s": (None if first_conflict is None
+                               else round(first_conflict, 3)),
+    }
+
+
 def collective_avoidance_candidates(paths, lateral=3.5, vertical=3.0):
     """Generate rigid fleet offsets perpendicular to the mean route."""
     arrays = [np.asarray(path, dtype=float) for path in paths]
@@ -235,7 +284,8 @@ def validate_static_paths(scene_id, paths):
 
 
 def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0,
-                              required_clearance=0.5,warning_clearance=2.0,scene_id=None):
+                              required_clearance=0.5,warning_clearance=2.0,
+                              scene_id=None,minimum_separation=3.0):
     """Select one rigid 3D offset safe for every vehicle, or reject all."""
     if not paths:raise DynamicObstacleError("at least one vehicle path is required")
     offsets=collective_avoidance_candidates(paths) if candidate_offsets is None else candidate_offsets
@@ -246,25 +296,29 @@ def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0
         clearances=[report["minimum_clearance_m"] for report in reports if report["minimum_clearance_m"] is not None]
         minimum=min(clearances) if clearances else float("inf")
         static=validate_static_paths(scene_id,shifted) if scene_id is not None else {"feasible":True,"error_code":None,"message":"static validation disabled"}
+        separation=assess_fleet_separation(
+            shifted,horizon=horizon,minimum_separation=minimum_separation)
         if any(report["level"]=="CRITICAL" for report in reports):rejection="DYNAMIC_CONFLICT"
         elif clearances and minimum<float(required_clearance):rejection="DYNAMIC_CLEARANCE"
+        elif not separation["safe"]:rejection="VEHICLE_SEPARATION"
         elif not static["feasible"]:rejection=static["error_code"] or "STATIC_CONSTRAINT"
         else:rejection=None
         value={"offset":[round(float(v),3) for v in offset],
                "minimum_clearance_m":None if not clearances else round(float(minimum),3),
                "levels":[report["level"] for report in reports],
-               "static_validation":static,"rejection_reason":rejection}
+               "static_validation":static,"fleet_separation":separation,"rejection_reason":rejection}
         evaluated.append(value)
         if rejection is None:
-            norm=float(np.linalg.norm(np.asarray(offset,dtype=float)));viable.append((minimum,-norm,value))
+            norm=float(np.linalg.norm(np.asarray(offset,dtype=float)));viable.append((norm,len(evaluated),value))
         else:rejection_summary[rejection]=rejection_summary.get(rejection,0)+1
     if not viable:return {"viable":False,"selected_offset":None,"minimum_clearance_m":None,
-        "candidates":evaluated,"reason":"no collective offset satisfies dynamic and static clearance",
+        "candidates":evaluated,"reason":"no collective offset satisfies dynamic, static and fleet separation constraints",
         "rejection_summary":rejection_summary}
-    selected=max(viable,key=lambda item:(item[0],item[1]))[2]
+    selected=min(viable,key=lambda item:(item[0],item[1]))[2]
     return {"viable":True,"selected_offset":selected["offset"],
             "minimum_clearance_m":selected["minimum_clearance_m"],"candidates":evaluated,
             "reason":"safe collective offset found","static_validation":selected["static_validation"],
+            "fleet_separation":selected["fleet_separation"],
             "rejection_summary":rejection_summary}
 
 

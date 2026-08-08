@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path, plan_collective_avoidance, prediction_path
+from logistics_gazebo_sim_ros.dynamic_obstacles import assess_fleet_separation, assess_timed_path, plan_collective_avoidance, prediction_path
 
 
 class DynamicRiskMonitor:
@@ -18,6 +18,7 @@ class DynamicRiskMonitor:
         self.horizon = float(rospy.get_param("~horizon_s", 8.0))
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
+        self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
         sx = float(rospy.get_param("~spawn_x", -40.0))
         sy = float(rospy.get_param("~spawn_y", -40.0))
         spacing = float(rospy.get_param("~spawn_spacing_m", 3.0))
@@ -28,6 +29,8 @@ class DynamicRiskMonitor:
         self.targets = [None] * self.count
         self.obstacles = []
         self.last_obstacle_stamp = None
+        self.predicted_paths = None
+        self.last_prediction_stamp = None
         for index in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),
                              PoseStamped, self.pose_cb, callback_args=index, queue_size=1)
@@ -35,6 +38,8 @@ class DynamicRiskMonitor:
                              self.target_cb, callback_args=index, queue_size=1)
         rospy.Subscriber("/dynamic_obstacles/state", String,
                          self.obstacles_cb, queue_size=1)
+        rospy.Subscriber("/fleet/nominal_prediction", String,
+                         self.prediction_cb, queue_size=1)
         self.risk_pub = rospy.Publisher("/fleet/dynamic_risk", String,
                                         queue_size=5, latch=True)
         self.diag_pub = rospy.Publisher("/fleet/dynamic_diagnostics",
@@ -54,6 +59,40 @@ class DynamicRiskMonitor:
         except (TypeError, ValueError) as error:
             rospy.logerr_throttle(2.0, "invalid dynamic obstacle state: %s", error)
 
+    def prediction_cb(self, message):
+        try:
+            raw=json.loads(message.data).get("paths",[])
+            if len(raw)!=self.count:
+                raise ValueError("prediction vehicle count mismatch")
+            checked=[]
+            for path in raw:
+                rows=[[float(axis) for axis in row] for row in path]
+                if len(rows)<2 or any(len(row)!=4 for row in rows):
+                    raise ValueError("prediction rows must be [t,x,y,z]")
+                if any(rows[index+1][0]<=rows[index][0]
+                       for index in range(len(rows)-1)):
+                    raise ValueError("prediction timestamps must increase")
+                checked.append(rows)
+            self.predicted_paths=checked
+            self.last_prediction_stamp=rospy.Time.now()
+        except (TypeError,ValueError) as error:
+            rospy.logerr_throttle(2.0,"invalid fleet prediction: %s",error)
+
+    def paths_for_report(self):
+        fresh=(self.predicted_paths is not None and
+               self.last_prediction_stamp is not None and
+               rospy.Time.now()-self.last_prediction_stamp<rospy.Duration(0.5))
+        if not fresh:
+            return [self.path_for(index) for index in range(self.count)]
+        result=[]
+        for index,path in enumerate(self.predicted_paths):
+            ox,oy=self.origins[index]
+            converted=[[row[0],row[1]+ox,row[2]+oy,row[3]] for row in path]
+            pose=self.poses[index]
+            converted[0]=[0.0,pose.x+ox,pose.y+oy,pose.z]
+            result.append(converted)
+        return result
+
     def path_for(self, index):
         pose, target = self.poses[index], self.targets[index]
         ox, oy = self.origins[index]
@@ -71,7 +110,7 @@ class DynamicRiskMonitor:
             return {"level": "STALE", "message": "等待无人机位姿与目标",
                     "vehicle_reports": [], "obstacle_count": len(self.obstacles)}
         reports = []
-        paths=[self.path_for(index) for index in range(self.count)]
+        paths=self.paths_for_report()
         order = {"SAFE": 0, "WARNING": 1, "CRITICAL": 2}
         for index in range(self.count):
             value = assess_timed_path(
@@ -81,7 +120,10 @@ class DynamicRiskMonitor:
             reports.append(value)
         level = max((value["level"] for value in reports),
                     key=lambda value: order[value])
-        avoidance=(plan_collective_avoidance(paths,self.obstacles,horizon=self.horizon,scene_id=self.scene_id) if level in ("WARNING","CRITICAL") else {"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None})
+        separation=assess_fleet_separation(
+            paths,horizon=self.horizon,minimum_separation=self.minimum_separation)
+        if not separation["safe"]:level="CRITICAL"
+        avoidance=(plan_collective_avoidance(paths,self.obstacles,horizon=self.horizon,scene_id=self.scene_id,minimum_separation=self.minimum_separation) if level in ("WARNING","CRITICAL") else {"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None})
         nearest = min(reports, key=lambda value:
                       float("inf") if value["minimum_clearance_m"] is None
                       else value["minimum_clearance_m"])
@@ -90,6 +132,7 @@ class DynamicRiskMonitor:
                 "nearest_vehicle": nearest["vehicle_id"],
                 "minimum_clearance_m": nearest["minimum_clearance_m"],
                 "time_to_conflict_s": nearest["time_to_conflict_s"],
+                "fleet_separation":separation,
                 "avoidance":avoidance}
 
     def publish(self, report):
@@ -105,7 +148,10 @@ class DynamicRiskMonitor:
             KeyValue("minimum_clearance_m",
                      str(report.get("minimum_clearance_m", "unknown"))),
             KeyValue("time_to_conflict_s",
-                     str(report.get("time_to_conflict_s", "none")))]
+                     str(report.get("time_to_conflict_s", "none"))),
+            KeyValue("minimum_separation_m", str(
+                (report.get("fleet_separation") or {}).get(
+                    "minimum_separation_m", "unknown")))]
         self.diag_pub.publish(DiagnosticArray(
             header=Header(stamp=rospy.Time.now()), status=[status]))
 

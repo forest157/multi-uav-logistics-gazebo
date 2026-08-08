@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from logistics_gazebo_sim_ros.dynamic_obstacles import (
-    DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_timed_path, interpolate_timed_path,
+    DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_fleet_separation, assess_timed_path, interpolate_timed_path,
     obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path)
 
 
@@ -144,6 +144,27 @@ class DynamicObstacleTest(unittest.TestCase):
     def test_spawn_clearance_detects_direct_overlap(self):
         self.assertAlmostEqual(minimum_spawn_clearance([0,0,5],[[0,0,5],[10,0,5]]),0.0)
         self.assertGreater(minimum_spawn_clearance([0,0,5],[[10,0,5]]),5.0)
+
+    def test_fleet_separation_detects_between_waypoint_crossing(self):
+        paths=[
+            [[0.0,-5.0,0.0,5.0],[10.0,5.0,0.0,5.0]],
+            [[0.0,5.0,0.0,5.0],[10.0,-5.0,0.0,5.0]],
+        ]
+        report=assess_fleet_separation(
+            paths,horizon=10.0,sample_period=0.1,minimum_separation=3.0)
+        self.assertFalse(report["safe"])
+        self.assertEqual(report["closest_pair"],["uav0","uav1"])
+        self.assertAlmostEqual(report["minimum_separation_m"],0.0)
+
+    def test_collective_planner_rejects_vehicle_crossing(self):
+        paths=[
+            [[0.0,-5.0,0.0,5.0],[10.0,5.0,0.0,5.0]],
+            [[0.0,5.0,0.0,5.0],[10.0,-5.0,0.0,5.0]],
+        ]
+        result=plan_collective_avoidance(
+            paths,[],candidate_offsets=[[0.0,3.0,0.0]],horizon=10.0)
+        self.assertFalse(result["viable"])
+        self.assertEqual(result["rejection_summary"]["VEHICLE_SEPARATION"],1)
 
 if __name__ == "__main__":
     unittest.main()

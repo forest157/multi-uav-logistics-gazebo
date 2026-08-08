@@ -40,6 +40,9 @@ class MissionPlayer:
         if not(self.count==len(self.initial)==len(self.cruise)==len(self.delivery)):raise ValueError("Formation sizes must match vehicle_count")
         self.pubs=[rospy.Publisher("/uav{}/target_pose".format(i),PoseStamped,queue_size=5) for i in range(self.count)]
         self.nominal_pubs=[rospy.Publisher("/uav{}/nominal_target_pose".format(i),PoseStamped,queue_size=5) for i in range(self.count)]
+        self.prediction_pub=rospy.Publisher(
+            "/fleet/nominal_prediction",String,queue_size=2)
+        self.prediction_horizon=float(rospy.get_param("~prediction_horizon_s",8.0))
         self.state_pub=rospy.Publisher("/fleet/mission_state",String,queue_size=5,latch=True);self.complete_pub=rospy.Publisher("/fleet/mission_complete",Bool,queue_size=1,latch=True);self.takeoff_pub=rospy.Publisher("/fleet/takeoff_authorized",Bool,queue_size=1,latch=True)
         self.ready,self.altitudes=[False]*self.count,[0.0]*self.count
         self.current_poses=[None]*self.count
@@ -135,6 +138,19 @@ class MissionPlayer:
             z=lerp(cz,self.touchdown_altitude,r)
         targets=[(c[0]+rel[0]-self.initial[i][0],c[1]+rel[1]-self.initial[i][1],z+rel[2]-self.initial[i][2]) for i,rel in enumerate(f)]
         return stage,phase,targets
+    def prediction_paths(self):
+        sample_period=0.5
+        count=max(2,int(math.ceil(self.prediction_horizon/sample_period))+1)
+        paths=[[] for _ in range(self.count)]
+        clock_scale=max(0.0,self.dynamic_scale)
+        for index in range(count):
+            seconds=min(self.prediction_horizon,index*sample_period)
+            _,_,targets=self.targets(self.elapsed+seconds*clock_scale)
+            for vehicle,target in enumerate(targets):
+                paths[vehicle].append(
+                    [round(seconds,3)]+[round(float(axis),4) for axis in target])
+        return paths
+
     def run(self):
         rate=rospy.Rate(20)
         while not rospy.is_shutdown():
@@ -144,6 +160,10 @@ class MissionPlayer:
             stage,phase,targets=self.targets(self.elapsed)
             for pub,(x,y,z) in zip(self.nominal_pubs,targets):
                 msg=PoseStamped();msg.header.stamp,msg.header.frame_id=rospy.Time.now(),"map";msg.pose.position.x,msg.pose.position.y,msg.pose.position.z=x,y,z;msg.pose.orientation.w=1.0;pub.publish(msg)
+            self.prediction_pub.publish(json.dumps(
+                {"stamp":now.to_sec(),"horizon_s":self.prediction_horizon,
+                 "paths":self.prediction_paths()},separators=(",",":")))
+
             if self.dynamic_avoidance_enabled:
                 self.avoidance_command=self.avoidance_execution.command(now.to_sec())
                 if self.avoidance_command["action"]=="AVOID":
