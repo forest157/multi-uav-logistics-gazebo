@@ -14,6 +14,8 @@ ERRORS = {
     "E_LANDING_CAPACITY": ("FEASIBILITY", "ERROR", False, "返航降落区域无法容纳降落队形", ["move_start", "use_alternate_landing_site"]),
     "E_VERTICAL_CLEARANCE": ("FEASIBILITY", "ERROR", False, "上下净空不足，无法容纳当前三维队形", ["adjust_altitude", "use_flat_formation"]),
     "E_CORRIDOR_TOO_NARROW": ("FEASIBILITY", "ERROR", False, "路径局部净空不足，无法容纳完整编队", ["increase_altitude", "use_column", "use_vertical_formation", "replan_path"]),
+    "E_NO_FEASIBLE_FORMATION": ("FEASIBILITY", "ERROR", False, "局部路段没有可安全通过的候选队形", ["increase_altitude", "replan_path", "reduce_fleet_size"]),
+    "E_FORMATION_TRANSITION": ("FEASIBILITY", "ERROR", False, "找不到满足机间距和障碍物约束的队形变换窗口", ["replan_path", "increase_altitude", "move_transition_area"]),
     "E_OMPL_BINARY": ("ENVIRONMENT", "ERROR", True, "OMPL规划程序不可用", ["rebuild_workspace", "check_installation"]),
     "E_OMPL_TIMEOUT": ("PLANNING", "WARNING", True, "规划器运行超时，当前结果不能证明任务无解", ["retry", "increase_planning_time", "adjust_route"]),
     "E_OMPL_NO_PATH": ("PLANNING", "WARNING", True, "当前求解时间内没有找到路径，不代表场景一定无解", ["retry", "adjust_altitude", "change_formation"]),
@@ -28,6 +30,7 @@ ENVIRONMENT_MARKERS = (
     "object is not callable", "object is not iterable",
     "keywords must be strings", "Parameter' object",
     "unsupported operand type", "SafeDumper", "SafeLoader",
+    "has no attribute 'nodeType'", "not supported between instances of",
 )
 
 
