@@ -10,9 +10,16 @@ class Recorder:
         root=os.path.expanduser(rospy.get_param("~output_dir","~/.ros/logistics_runs"));os.makedirs(root,exist_ok=True)
         self.path=os.path.join(root,time.strftime("mission_%Y%m%d_%H%M%S.csv"))
         self.handle=open(self.path,"w",newline="",encoding="utf-8");self.writer=csv.writer(self.handle)
-        self.writer.writerow(["ros_time","state","stage","progress","safety_level","safety_message","min_separation_m","min_clearance_m","max_tracking_error_m","uav0_x","uav0_y","uav0_z","uav1_x","uav1_y","uav1_z","uav2_x","uav2_y","uav2_z"])
-        self.state={"state":"INITIALIZING","stage":0,"progress":0.0};self.safety=["","","","",""];self.poses=[None,None,None]
-        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1)
+        self.writer.writerow(["ros_time","state","stage","phase","progress",
+            "dynamic_action","dynamic_risk","speed_scale","avoidance_state",
+            "avoidance_offset_x","avoidance_offset_y","avoidance_offset_z",
+            "avoidance_failure","predicted_separation_m","dynamic_clearance_m",
+            "dynamic_time_to_conflict_s","safety_level","safety_message",
+            "min_separation_m","min_clearance_m","max_tracking_error_m",
+            "uav0_x","uav0_y","uav0_z","uav1_x","uav1_y","uav1_z",
+            "uav2_x","uav2_y","uav2_z"])
+        self.state={"state":"INITIALIZING","stage":0,"progress":0.0};self.dynamic={};self.safety=["","","","",""];self.poses=[None,None,None]
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1);rospy.Subscriber("/fleet/dynamic_risk",String,self.dynamic_cb,queue_size=1)
         for i in range(3):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
         rospy.Timer(rospy.Duration(0.2),self.sample);rospy.on_shutdown(self.close);rospy.loginfo("Mission CSV: %s",self.path)
     def state_cb(self,msg):
@@ -21,9 +28,23 @@ class Recorder:
     def diag_cb(self,msg):
         if not msg.status:return
         s=msg.status[0];v={x.key:x.value for x in s.values};self.safety=[s.level,s.message,v.get("min_separation_m",""),v.get("min_obstacle_clearance_m",""),v.get("max_tracking_error_m","")]
+    def dynamic_cb(self,msg):
+        try:self.dynamic=json.loads(msg.data)
+        except ValueError:pass
+
     def pose_cb(self,msg,i):self.poses[i]=msg.pose.position
     def sample(self,_):
-        row=[rospy.Time.now().to_sec(),self.state.get("state",""),self.state.get("stage",""),self.state.get("progress","")]+self.safety
+        execution=self.state.get("avoidance_execution") or {}
+        offset=list(execution.get("offset") or [0.0,0.0,0.0])+[0.0,0.0,0.0]
+        separation=self.dynamic.get("fleet_separation") or {}
+        row=[rospy.Time.now().to_sec(),self.state.get("state",""),
+             self.state.get("stage",""),self.state.get("phase",""),
+             self.state.get("progress",""),self.state.get("dynamic_action",""),
+             self.state.get("dynamic_risk",""),self.state.get("speed_scale",""),
+             execution.get("state",""),offset[0],offset[1],offset[2],
+             execution.get("failure",""),separation.get("minimum_separation_m",""),
+             self.dynamic.get("minimum_clearance_m",""),
+             self.dynamic.get("time_to_conflict_s","")]+self.safety
         for p in self.poses:row += [p.x,p.y,p.z] if p else ["","",""]
         self.writer.writerow(row);self.handle.flush()
     def close(self):
