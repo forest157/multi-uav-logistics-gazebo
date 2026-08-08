@@ -1,6 +1,6 @@
 vehicle_count: 3
 cruise_altitude: 5.0
-landing_altitude: 0.8
+landing_altitude: 0.18
 ready_altitude: 4.0
 initial_formation: [[-3.0, 0.0], [0.0, 0.0], [3.0, 0.0]]
 cruise_formation: [[-3.0, -3.0], [0.0, 3.0], [3.0, -3.0]]
@@ -12,7 +12,7 @@ stages:
   return_end: 18.0
   arrival_reconfigure_start: 18.0
   arrival_reconfigure_end: 20.0
-  descent_end: 24.0
+  descent_end: 48.92
 center_trajectory:
   - [4.0, 0.0, 0.0]
   - [7.0, 0.0, 3.0]
