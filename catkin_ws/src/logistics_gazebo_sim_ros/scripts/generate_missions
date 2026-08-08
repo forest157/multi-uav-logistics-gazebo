@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate 3D fleet missions with ROS OMPL + PathSimplifier + TOPPRA."""
 import argparse
+import json
 import math
 import os
 import subprocess
@@ -12,6 +13,7 @@ import roslib.packages
 from logistics_gazebo_sim_ros.scenes import SCENES,SCALE,metric_xy
 from logistics_gazebo_sim_ros.trajectory_parameterization import toppra_parameterize_3d
 from logistics_gazebo_sim_ros.formation_3d import FORMATION_NAMES,assign_slots,envelope,generate,initial_line,minimum_separation
+from logistics_gazebo_sim_ros.clearance_analyzer import analyze_path
 
 ALT={0:8.,1:37.,2:12.,3:8.,4:8.,5:10.,6:12.}
 MARGIN_XY=4.5
@@ -91,16 +93,24 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
                        ("GOAL",(goal[0],goal[1],altitude))):
         if blocked(specs,point):raise PlanningError("E_BLOCKED:"+name)
 
-    last_error=None
+    last_error=None;clearance_report=None
     for _ in range(3):
         path,planner_status=ompl_plan(start,goal,altitude,specs,3.0+below,45.0-above)
+        clearance_report=analyze_path(scene_id,path,formation,vehicle_count,spacing)
+        if not clearance_report["feasible"]:
+            last_error=PlanningError("{}:{}".format(
+                clearance_report["error_code"],
+                json.dumps(clearance_report,ensure_ascii=False,separators=(",",":"))))
+            continue
         try:
             profile=toppra_parameterize_3d(
                 path,lambda point:blocked(specs,point),
                 velocity_limit=2.0,acceleration_limit=1.0,sample_period=0.1)
             break
         except RuntimeError as exc:last_error=exc
-    else:raise PlanningError("E_TOPPRA:"+str(last_error))
+    else:
+        if isinstance(last_error,PlanningError):raise last_error
+        raise PlanningError("E_TOPPRA:"+str(last_error))
 
     duration=profile["duration"]
     positions=profile["positions"].copy()
@@ -135,6 +145,7 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
                     "smoother":"ompl_path_simplifier_bspline",
                     "map_representation":"inflated_3d_obstacle_volume",
                     "status":planner_status},
+         "clearance_analysis":clearance_report,
          "trajectory_parameterization":{
              "method":"toppra_3d","velocity_limit_mps":2.0,
              "acceleration_limit_mps2":1.0,
