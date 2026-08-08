@@ -11,9 +11,9 @@ import yaml
 import numpy as np
 import roslib.packages
 from logistics_gazebo_sim_ros.scenes import SCENES,SCALE,metric_xy
-from logistics_gazebo_sim_ros.trajectory_parameterization import toppra_parameterize_3d
 from logistics_gazebo_sim_ros.formation_3d import FORMATION_NAMES,assign_slots,envelope,generate,initial_line,minimum_separation
-from logistics_gazebo_sim_ros.clearance_analyzer import analyze_path
+from logistics_gazebo_sim_ros.clearance_analyzer import analyze_ground_capacity,analyze_path
+from logistics_gazebo_sim_ros.error_model import classify_exception
 
 ALT={0:8.,1:37.,2:12.,3:8.,4:8.,5:10.,6:12.}
 MARGIN_XY=4.5
@@ -89,10 +89,33 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
     if not 3<=altitude<=45:raise PlanningError("E_ALTITUDE")
     if math.dist(start,goal)<3:raise PlanningError("E_DISTANCE")
     initial=initial_line(vehicle_count,spacing);cruise=assign_slots(initial,generate(formation,vehicle_count,spacing));delivery=assign_slots(cruise,generate("row",vehicle_count,spacing));margin_xy,below,above=envelope(cruise);specs=obstacle_specs(scene,margin_xy,below)
+    phase_analysis={}
+    checks=(
+        ("start_takeoff",analyze_ground_capacity(scene_id,start,"column",vehicle_count,spacing,"E_START_CAPACITY"),"E_START_CAPACITY"),
+        ("start_cruise",analyze_path(scene_id,[(start[0],start[1],altitude)],formation,vehicle_count,spacing),"E_START_CAPACITY"),
+        ("goal_cruise",analyze_path(scene_id,[(goal[0],goal[1],altitude)],formation,vehicle_count,spacing),"E_GOAL_CAPACITY"),
+        ("goal_delivery",analyze_path(scene_id,[(goal[0],goal[1],altitude)],"row",vehicle_count,spacing),"E_DELIVERY_CAPACITY"),
+        ("home_landing",analyze_ground_capacity(scene_id,start,"column",vehicle_count,spacing,"E_LANDING_CAPACITY"),"E_LANDING_CAPACITY"))
+    for phase,report,code in checks:
+        phase_analysis[phase]=report
+        if not report["feasible"]:
+            report["error_code"]=code
+            raise PlanningError(code+":"+json.dumps(report,ensure_ascii=False,separators=(",",":")))
+    transition_pairs=(("departure",initial,cruise),("delivery",cruise,delivery),
+                      ("reform",delivery,cruise),("arrival",cruise,initial))
+    for name,source,target in transition_pairs:
+        sampled=[(1-ratio)*source+ratio*target for ratio in np.linspace(0.0,1.0,101)]
+        min_distance=min(minimum_separation(values) for values in sampled)
+        max_horizontal=max(envelope(values)[0] for values in sampled)
+        phase_analysis[name+"_transition"]={
+            "feasible":True,"minimum_raw_separation_m":round(float(min_distance),3),
+            "safety_scaling_required":bool(min_distance<spacing),
+            "conservative_horizontal_envelope_m":round(float(max_horizontal),3)}
     for name,point in (("START",(start[0],start[1],altitude)),
                        ("GOAL",(goal[0],goal[1],altitude))):
         if blocked(specs,point):raise PlanningError("E_BLOCKED:"+name)
 
+    from logistics_gazebo_sim_ros.trajectory_parameterization import toppra_parameterize_3d
     last_error=None;clearance_report=None
     for _ in range(3):
         path,planner_status=ompl_plan(start,goal,altitude,specs,3.0+below,45.0-above)
@@ -146,6 +169,7 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
                     "map_representation":"inflated_3d_obstacle_volume",
                     "status":planner_status},
          "clearance_analysis":clearance_report,
+         "phase_analysis":phase_analysis,
          "trajectory_parameterization":{
              "method":"toppra_3d","velocity_limit_mps":2.0,
              "acceleration_limit_mps2":1.0,
@@ -181,8 +205,9 @@ def main():
             output=args.output or os.path.join(root,"config","mission_scene%d.yaml"%scene_id)
             with open(output,"w") as stream:yaml.safe_dump(cfg,stream,sort_keys=False)
             if args.report_json:
-                summary={"scene_id":scene_id,"mission_path":output,
+                summary={"success":True,"scene_id":scene_id,"mission_path":output,
                          "clearance_analysis":cfg["clearance_analysis"],
+                         "phase_analysis":cfg["phase_analysis"],
                          "trajectory_parameterization":cfg["trajectory_parameterization"],
                          "stages":cfg["stages"]}
                 with open(args.report_json,"w",encoding="utf-8") as stream:
@@ -190,6 +215,15 @@ def main():
             print("OK OMPL3D scene=%d states=%d duration=%.2f"%(
                 scene_id,len(path),cfg["stages"]["outbound_end"]-18.0))
     except Exception as exc:
-        print("ERROR "+str(exc),file=sys.stderr);return 2
+        failure=classify_exception(exc)
+        if args.report_json:
+            try:
+                with open(args.report_json,"w",encoding="utf-8") as stream:
+                    json.dump({"success":False,"diagnostic":failure},stream,
+                              ensure_ascii=False,indent=2)
+            except OSError:pass
+        print("ERROR {}: {}".format(failure["code"],failure["message"]),file=sys.stderr)
+        if failure["detail"]:print(failure["detail"],file=sys.stderr)
+        return 2
     return 0
 if __name__=="__main__":sys.exit(main())

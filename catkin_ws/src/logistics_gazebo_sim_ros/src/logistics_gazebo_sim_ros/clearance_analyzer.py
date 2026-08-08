@@ -191,3 +191,31 @@ def analyze_candidates(scene_id, path, formations, vehicle_count=3,
         "feasible_formations": feasible,
         "reports": reports,
     }
+
+
+def analyze_ground_capacity(scene_id, xy, formation="column", vehicle_count=3,
+                            spacing=3.0, error_code="E_START_CAPACITY"):
+    """Check that a complete formation footprint fits at takeoff/landing."""
+    if scene_id not in SCENES:
+        return _failure("E_SCENE", "场景编号无效", (xy[0],xy[1],0), {}, {})
+    offsets=generate(formation,int(vehicle_count),float(spacing))
+    horizontal,_,_=envelope(offsets)
+    x,y=map(float,xy);boundary=WORLD_XY_LIMIT-max(abs(x),abs(y))
+    required={"horizontal_m":horizontal,"below_m":0.0,"above_m":0.0}
+    if max(abs(x),abs(y))>CENTER_XY_LIMIT or boundary<horizontal:
+        return _failure(error_code,"地面编队超出安全边界",(x,y,0),
+                        {"horizontal_m":boundary},required,
+                        suggestions=["move_start_or_goal","use_compact_formation"])
+    for primitive in obstacle_primitives(SCENES[scene_id]):
+        distance=horizontal_distance(primitive,x,y)
+        if distance<horizontal:
+            return _failure(error_code,"地面区域无法容纳完整编队",(x,y,0),
+                            {"horizontal_m":distance},required,
+                            obstacle=primitive["label"],
+                            suggestions=["move_start_or_goal","use_compact_formation"])
+    return {"feasible":True,"error_code":None,
+            "message":"地面区域可容纳完整编队","formation":formation,
+            "vehicle_count":int(vehicle_count),
+            "location":[round(x,3),round(y,3),0.0],
+            "required":{"horizontal_m":round(horizontal,3)},
+            "available":{"horizontal_m":round(boundary,3)}}
