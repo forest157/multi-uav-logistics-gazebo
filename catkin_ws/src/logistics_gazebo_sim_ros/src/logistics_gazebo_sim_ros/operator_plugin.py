@@ -9,7 +9,7 @@ from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import Point, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim_ros.scenes import SCENES, SCALE, metric_xy
-from python_qt_binding.QtCore import QObject, QProcess, Qt, QTimer, Signal
+from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget)
@@ -72,7 +72,7 @@ class OperatorPlugin(Plugin):
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
         sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget)
-        self.simulation_stop_requested=False
+        self.simulation_stop_requested=False;self.simulation_start_pending=False
         self.process.started.connect(self.simulation_process_started)
         self.process.errorOccurred.connect(self.simulation_process_error)
         self.process.finished.connect(self.simulation_process_finished)
@@ -288,19 +288,30 @@ class OperatorPlugin(Plugin):
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
         self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
-        self.simulation_stop_requested=False;self.start_sim.setEnabled(False)
+        self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
+        px4_root=os.path.expanduser("~/PX4_Firmware")
+        environment=QProcessEnvironment.systemEnvironment()
+        additions={
+            "ROS_PACKAGE_PATH":[px4_root,os.path.join(px4_root,"Tools","sitl_gazebo")],
+            "GAZEBO_PLUGIN_PATH":[os.path.join(px4_root,"build","px4_sitl_default","build_gazebo")],
+            "GAZEBO_MODEL_PATH":[os.path.join(px4_root,"Tools","sitl_gazebo","models")],
+            "LD_LIBRARY_PATH":[os.path.join(px4_root,"build","px4_sitl_default","build_gazebo")]}
+        for name,paths in additions.items():
+            current=environment.value(name)
+            environment.insert(name,":".join(([current] if current else [])+paths))
+        self.process.setProcessEnvironment(environment)
         self.process.start("setsid",["roslaunch"]+args)
     def simulation_process_started(self):
-        self.state.setText("启动命令已提交，Gazebo 与三机 PX4 正在加载…")
-        QMessageBox.information(self.widget,"仿真开始启动",
-            "启动命令已成功提交。\nGazebo 场景和三架 PX4 正在加载，请稍候。")
+        self.state.setText("启动命令已提交，正在等待 Gazebo 与三机 PX4 就绪…")
     def simulation_process_error(self,_error):
+        self.simulation_start_pending=False
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
         self.state.setText("仿真启动失败")
         QMessageBox.critical(self.widget,"仿真启动失败",
             "无法启动 roslaunch：{}\n请检查 ROS 环境和启动日志。".format(self.process.errorString()))
     def simulation_process_finished(self,exit_code,_exit_status):
+        self.simulation_start_pending=False
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
         if self.simulation_stop_requested:
             self.state.setText("三机仿真已停止")
@@ -339,7 +350,12 @@ class OperatorPlugin(Plugin):
         except rospy.ServiceException as exc:QMessageBox.warning(self.widget,"\u670d\u52a1\u8c03\u7528\u5931\u8d25",str(exc))
     def state_cb(self,msg):
         try:
-            d=json.loads(msg.data);self.state.setText(d["state"]);ph={"TAKEOFF_HOLD":"\u8d77\u98de\u7b49\u5f85","DEPARTURE_FORMATION":"\u51fa\u53d1\u7f16\u961f","OUTBOUND":"\u524d\u5f80\u914d\u9001\u70b9","DELIVERY_FORMATION":"\u6295\u9012\u4e00\u5b57\u7f16\u961f","DELIVERY_DESCENT":"\u6295\u9012\u4e0b\u964d","DELIVERY_RELEASE":"\u8d27\u7269\u6295\u9012","DELIVERY_ASCENT":"\u6295\u9012\u56de\u5347","CRUISE_REFORMATION":"\u6062\u590d\u5de1\u822a\u961f\u5f62","RETURN":"\u8fd4\u822a","HOME_FORMATION":"\u8fd4\u822a\u7f16\u961f","HOME_DESCENT":"\u8d77\u70b9\u964d\u843d"};self.stage.setText("{} - {}".format(d["stage"],ph.get(d.get("phase"),"-")))
+            d=json.loads(msg.data)
+            if self.simulation_start_pending:
+                self.simulation_start_pending=False
+                QMessageBox.information(self.widget,"仿真启动成功",
+                    "Gazebo、三机 PX4 与任务节点已连接，可以开始任务。")
+            self.state.setText(d["state"]);ph={"TAKEOFF_HOLD":"\u8d77\u98de\u7b49\u5f85","DEPARTURE_FORMATION":"\u51fa\u53d1\u7f16\u961f","OUTBOUND":"\u524d\u5f80\u914d\u9001\u70b9","DELIVERY_FORMATION":"\u6295\u9012\u4e00\u5b57\u7f16\u961f","DELIVERY_DESCENT":"\u6295\u9012\u4e0b\u964d","DELIVERY_RELEASE":"\u8d27\u7269\u6295\u9012","DELIVERY_ASCENT":"\u6295\u9012\u56de\u5347","CRUISE_REFORMATION":"\u6062\u590d\u5de1\u822a\u961f\u5f62","RETURN":"\u8fd4\u822a","HOME_FORMATION":"\u8fd4\u822a\u7f16\u961f","HOME_DESCENT":"\u8d77\u70b9\u964d\u843d"};self.stage.setText("{} - {}".format(d["stage"],ph.get(d.get("phase"),"-")))
             self.progress.setValue(int(1000*d["progress"]))
         except Exception:pass
     def diag_cb(self,msg):
