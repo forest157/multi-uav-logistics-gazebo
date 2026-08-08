@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path, plan_collective_avoidance
+from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path, plan_collective_avoidance, prediction_path
 
 
 class DynamicRiskMonitor:
@@ -59,9 +59,7 @@ class DynamicRiskMonitor:
         ox, oy = self.origins[index]
         start = (pose.x+ox, pose.y+oy, pose.z)
         end = (target.x+ox, target.y+oy, target.z)
-        distance = math.dist(start, end)
-        duration = min(self.horizon, max(0.2, distance/max(0.1, self.speed)))
-        return [[0.0] + list(start), [duration] + list(end)]
+        return prediction_path(start, end, self.horizon)
 
     def report(self):
         if self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp>rospy.Duration(1.0):

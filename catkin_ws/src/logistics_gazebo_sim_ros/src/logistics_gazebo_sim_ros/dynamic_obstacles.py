@@ -34,6 +34,27 @@ def predict_position(obstacle, seconds):
     return item["position"] + item["velocity"] * max(0.0, float(seconds))
 
 
+def prediction_path(start, target, horizon):
+    """Keep prediction coverage at the full horizon, including while holding."""
+    start=np.asarray(start,dtype=float);target=np.asarray(target,dtype=float)
+    duration=float(horizon)
+    if start.shape!=(3,) or target.shape!=(3,):
+        raise DynamicObstacleError("prediction endpoints must contain xyz")
+    if duration<=0.0:
+        raise DynamicObstacleError("prediction horizon must be positive")
+    return [[0.0]+start.tolist(),[duration]+target.tolist()]
+
+
+def minimum_spawn_clearance(proposed, vehicle_positions):
+    proposed=np.asarray(proposed,dtype=float)
+    positions=np.asarray(vehicle_positions,dtype=float)
+    if proposed.shape!=(3,) or positions.ndim!=2 or positions.shape[1]!=3:
+        raise DynamicObstacleError("spawn clearance requires xyz positions")
+    if len(positions)==0:
+        raise DynamicObstacleError("vehicle positions are required")
+    return float(np.min(np.linalg.norm(positions-proposed,axis=1)))
+
+
 def interpolate_timed_path(path, query_time):
     """Interpolate rows shaped [time, x, y, z]."""
     values = np.asarray(path, dtype=float)

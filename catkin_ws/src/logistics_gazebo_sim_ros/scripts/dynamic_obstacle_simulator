@@ -2,14 +2,16 @@
 """Spawn deterministic moving collision objects and publish their state."""
 import json
 import math
+import time
 
 import rospy
 import yaml
-from gazebo_msgs.msg import ModelState
+from gazebo_msgs.msg import ModelState, ModelStates
 from gazebo_msgs.srv import DeleteModel, SetModelState, SpawnModel
 from geometry_msgs.msg import Pose
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
+from logistics_gazebo_sim_ros.dynamic_obstacles import minimum_spawn_clearance
 
 
 def model_xml(name, radius, height, colour):
@@ -60,6 +62,9 @@ class DynamicObstacleSimulator:
         self.spawn = rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)
         self.move = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
         self.delete = rospy.ServiceProxy("/gazebo/delete_model", DeleteModel)
+        self.minimum_spawn_clearance=float(rospy.get_param("~minimum_spawn_clearance_m",5.0))
+        self.expected_vehicles=int(rospy.get_param("~expected_vehicle_count",3))
+        self.vehicle_positions=self.wait_for_vehicle_positions()
         self.spawn_all()
         self.started = rospy.Time.now()
         rospy.on_shutdown(self.cleanup)
@@ -77,9 +82,23 @@ class DynamicObstacleSimulator:
         velocity[2] += item["bob_amplitude"]*2.0*math.pi/max(0.5,item["bob_period"])*math.cos(bob_angle)
         return position, velocity
 
+    def wait_for_vehicle_positions(self):
+        deadline=time.monotonic()+20.0
+        while not rospy.is_shutdown() and time.monotonic()<deadline:
+            try:message=rospy.wait_for_message("/gazebo/model_states",ModelStates,timeout=1.0)
+            except rospy.ROSException:continue
+            positions=[[pose.position.x,pose.position.y,pose.position.z] for name,pose in zip(message.name,message.pose) if "iris" in name.lower()]
+            if len(positions)>=self.expected_vehicles:return positions
+        raise RuntimeError("dynamic obstacle spawn blocked: vehicle poses unavailable")
+
+
     def spawn_all(self):
         for item in self.items:
-            pose = Pose();pose.position.x,pose.position.y,pose.position.z=item["start"]
+            proposed,_=self.sample(item,0.0)
+            clearance=minimum_spawn_clearance(proposed,self.vehicle_positions)
+            if clearance<self.minimum_spawn_clearance:
+                raise RuntimeError("dynamic obstacle {} spawn clearance {:.2f}m is below {:.2f}m".format(item["id"],clearance,self.minimum_spawn_clearance))
+            pose = Pose();pose.position.x,pose.position.y,pose.position.z=proposed
             pose.orientation.w = 1.0
             result = self.spawn(item["id"], model_xml(item["id"], item["radius"],
                                 item["height"], item["colour"]), "", pose, "world")

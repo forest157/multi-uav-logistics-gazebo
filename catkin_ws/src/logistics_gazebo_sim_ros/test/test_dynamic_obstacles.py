@@ -5,7 +5,7 @@ import numpy as np
 
 from logistics_gazebo_sim_ros.dynamic_obstacles import (
     DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_timed_path, interpolate_timed_path,
-    obstacle_clearance, plan_collective_avoidance, predict_position, shifted_path)
+    obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path)
 
 
 class DynamicObstacleTest(unittest.TestCase):
@@ -135,6 +135,15 @@ class DynamicObstacleTest(unittest.TestCase):
         execution.update("WARNING",self.viable_avoidance(),0.0);execution.update("WARNING",self.viable_avoidance(),0.0)
         execution.command(0.1);self.assertEqual(execution.command(0.1)["state"],"ACTIVE")
         self.assertEqual(execution.update("STALE",{},0.2)["action"],"HOLD")
+
+    def test_stationary_target_keeps_full_prediction_horizon(self):
+        path=prediction_path([1.0,2.0,3.0],[1.0,2.0,3.0],8.0)
+        self.assertEqual(path[0][0],0.0);self.assertEqual(path[-1][0],8.0)
+        self.assertEqual(path[0][1:],path[-1][1:])
+
+    def test_spawn_clearance_detects_direct_overlap(self):
+        self.assertAlmostEqual(minimum_spawn_clearance([0,0,5],[[0,0,5],[10,0,5]]),0.0)
+        self.assertGreater(minimum_spawn_clearance([0,0,5],[[10,0,5]]),5.0)
 
 if __name__ == "__main__":
     unittest.main()
