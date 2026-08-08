@@ -3,6 +3,7 @@
 
 !/.gitignore
 !/README.md
+!/ROADMAP.md
 
 !/catkin_ws/
 /catkin_ws/*
