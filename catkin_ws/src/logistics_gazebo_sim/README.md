@@ -17,6 +17,10 @@
 
 障碍物按编队尺度进行水平 4.5 m、竖直 2.0 m 膨胀。状态边界为 x/y ±46 m、z 3~45 m。规划器允许通过爬升越过低障碍物，输出轨迹字段为 `[t,x,y,z]`。
 
+## 环境准备
+
+完整环境安装可参考 [XTDrone 中文手册：基础配置](https://www.yuque.com/xtdrone/manual_cn/basic_config_13)。本项目默认 ROS Noetic、Gazebo、PX4 SITL、MAVROS、XTDrone 和 catkin 工作空间已经按该教程配置完成。
+
 ## 已安装依赖
 
 - ros-noetic-ompl
