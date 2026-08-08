@@ -17,6 +17,14 @@ class V041ConfigurationTest(unittest.TestCase):
         setup=Path(ROOT,"setup.py").read_text(encoding="utf-8")
         self.assertIn("version='{}'".format(package),setup)
         self.assertEqual(package,"0.4.1")
+    def test_stable_package_readme_is_clean_utf8(self):
+        path=Path(ROOT).parent/"logistics_gazebo_sim"/"README.md"
+        text=path.read_bytes().decode("utf-8")
+        self.assertNotIn("\ufffd",text)
+        self.assertNotRegex(text,r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+        self.assertIn("基于 ROS Noetic",text)
+        self.assertIn("自定义的三次 B 样条",text)
+
     def test_package_readme_is_clean_utf8(self):
         raw=Path(ROOT,"README.md").read_bytes();text=raw.decode("utf-8")
         self.assertNotIn("\ufffd",text)
