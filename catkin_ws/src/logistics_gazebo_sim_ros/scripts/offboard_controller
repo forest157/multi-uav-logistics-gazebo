@@ -50,8 +50,8 @@ class Controller:
     def _configure_landing(self):
         try:
             rospy.wait_for_service("mavros/param/set",timeout=20.0)
-            for name,value in (("MPC_LAND_SPEED",0.35),("MPC_LAND_CRWL",0.15),
-                               ("MPC_LAND_ALT2",1.0),("MPC_LAND_ALT3",0.45),
+            for name,value in (("MPC_LAND_SPEED",0.6),("MPC_LAND_CRWL",0.3),
+                               ("MPC_LAND_ALT2",0.8),("MPC_LAND_ALT3",0.35),
                                ("COM_DISARM_LAND",0.15)):
                 result=self.param_set(param_id=name,value=ParamValue(integer=0,real=value))
                 if not result.success:rospy.logwarn("PX4 rejected landing parameter %s",name)
