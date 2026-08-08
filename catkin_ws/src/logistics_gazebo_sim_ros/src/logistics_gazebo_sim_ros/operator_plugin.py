@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 import signal
 import rospy
 import rospkg
@@ -54,7 +53,11 @@ class OperatorPlugin(Plugin):
         self.formation=QComboBox();self.formation.addItem("\u6b63\u4e09\u89d2\u961f\u5f62","triangle");self.formation.addItem("\u5012\u4e09\u89d2\u961f\u5f62","inverted");self.formation.addItem("\u6a2a\u961f","row");form.addRow("\u98de\u884c\u961f\u5f62",self.formation)
         self.formation.addItem("纵向一字队形（窄通道）","column");self.formation.addItem("垂直错层队形","vertical");self.formation.addItem("三维楔形队形","wedge3d");self.formation.addItem("三维螺旋队形","helix")
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
-        self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4")
+        self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
+        analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
+        self.analysis_state=QLabel("等待参数分析");self.analysis_state.setObjectName("analysisState")
+        self.analysis_detail=QLabel("场景、起终点、高度或队形变化后将自动重新规划");self.analysis_detail.setObjectName("analysisDetail");self.analysis_detail.setWordWrap(True)
+        af.addWidget(self.analysis_state);af.addWidget(self.analysis_detail);root.addWidget(analysis)
         mission=QGroupBox("\u4efb\u52a1\u63a7\u5236");row=QHBoxLayout(mission)
         self.start=QPushButton("\u5f00\u59cb");self.pause=QPushButton("\u6682\u505c");self.resume=QPushButton("\u7ee7\u7eed");self.reset=QPushButton("\u91cd\u7f6e\u4efb\u52a1");self.land=QPushButton("\u7d27\u6025\u964d\u843d")
         self.start.setObjectName("primary");self.land.setObjectName("danger");self.pause.setObjectName("secondary");self.resume.setObjectName("secondary");self.reset.setObjectName("secondary")
@@ -64,18 +67,111 @@ class OperatorPlugin(Plugin):
         self.state.setObjectName("statusBadge");self.stage.setObjectName("statusBadge")
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
         sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("安全状态",self.safety);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
-        self.process=QProcess(self.widget);self.pick_mode="start";self.point_bridge=PointBridge();self.point_bridge.point_received.connect(self.apply_clicked_point)
+        self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget)
+        self.analysis_timer=QTimer(self.widget);self.analysis_timer.setSingleShot(True);self.analysis_timer.setInterval(700);self.analysis_timer.timeout.connect(self.start_analysis)
+        self.analysis_timeout=QTimer(self.widget);self.analysis_timeout.setSingleShot(True);self.analysis_timeout.setInterval(20000);self.analysis_timeout.timeout.connect(self.analysis_timed_out)
+        self.analysis_process.finished.connect(self.analysis_finished)
+        self.valid_analysis_signature=None;self.analysis_running_signature=None;self.analysis_mission=None;self.analysis_report=None;self.analysis_retry=0
+        self.pick_mode="start";self.point_bridge=PointBridge();self.point_bridge.point_received.connect(self.apply_clicked_point)
         self.scene.currentIndexChanged.connect(self.update_defaults);self.start_sim.clicked.connect(self.launch_sim);self.stop_sim.clicked.connect(self.stop_simulation)
         self.pick_start.clicked.connect(lambda:self.begin_pick("start"));self.pick_goal.clicked.connect(lambda:self.begin_pick("goal"))
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
         self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True);rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
-        for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y):spin.valueChanged.connect(lambda _v:self.publish_preview())
+        for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
+        self.formation.currentIndexChanged.connect(self.parameters_changed)
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1)
         self.update_defaults()
     def update_defaults(self):
         sx,sy,gx,gy,alt=SCENE_DEFAULTS[self.scene.currentData()]
         for widget,value in ((self.start_x,sx),(self.start_y,sy),(self.goal_x,gx),(self.goal_y,gy),(self.altitude,alt)):widget.setValue(value)
-        QTimer.singleShot(50,self.publish_preview)
+        QTimer.singleShot(50,self.publish_preview);self.schedule_analysis()
+    def parameter_signature(self):
+        return (int(self.scene.currentData()),round(self.start_x.value(),3),
+                round(self.start_y.value(),3),round(self.goal_x.value(),3),
+                round(self.goal_y.value(),3),round(self.altitude.value(),3),
+                str(self.formation.currentData()))
+    def parameters_changed(self,_value=None):
+        self.publish_preview();self.schedule_analysis()
+    def schedule_analysis(self):
+        if not hasattr(self,"analysis_timer"):return
+        self.valid_analysis_signature=None;self.analysis_mission=None;self.analysis_report=None;self.analysis_retry=0
+        self.start_sim.setEnabled(False);self.analysis_state.setText("参数已变化，等待重新分析…")
+        self.analysis_state.setStyleSheet("color:#ffb74d;border-color:#8a6530;")
+        self.analysis_detail.setText("旧规划已失效；停止调整参数后将自动运行 OMPL、净空复核和 TOPPRA。")
+        self.analysis_timer.start()
+    def analysis_command(self,mission,report):
+        pkg=rospkg.RosPack().get_path("logistics_gazebo_sim_ros")
+        return [os.path.join(pkg,"scripts","generate_missions"),
+                "--scene",str(self.scene.currentData()),
+                "--start-x",str(self.start_x.value()),"--start-y",str(self.start_y.value()),
+                "--goal-x",str(self.goal_x.value()),"--goal-y",str(self.goal_y.value()),
+                "--altitude",str(self.altitude.value()),
+                "--formation",str(self.formation.currentData()),
+                "--output",mission,"--report-json",report]
+    def start_analysis(self):
+        if self.analysis_process.state()!=QProcess.NotRunning:
+            self.analysis_running_signature=None;self.analysis_process.kill();self.analysis_process.waitForFinished(1000)
+        signature=self.parameter_signature()
+        mission="/tmp/logistics_analysis_{}.yaml".format(os.getpid())
+        report="/tmp/logistics_analysis_{}.json".format(os.getpid())
+        for path in (mission,report):
+            try:
+                if os.path.isfile(path):os.unlink(path)
+            except OSError:pass
+        command=self.analysis_command(mission,report)
+        self.analysis_running_signature=signature;self.analysis_mission=mission;self.analysis_report=report
+        self.analysis_state.setText("正在进行三维规划与净空分析…")
+        self.analysis_state.setStyleSheet("color:#64b5f6;border-color:#315f83;")
+        self.analysis_detail.setText("当前参数：场景{}，起点({:.1f},{:.1f})，终点({:.1f},{:.1f})，高度{:.1f}m，队形{}".format(
+            signature[0],signature[1],signature[2],signature[3],signature[4],signature[5],signature[6]))
+        self.start_sim.setEnabled(False)
+        self.analysis_process.start(command[0],command[1:]);self.analysis_timeout.start()
+    def analysis_timed_out(self):
+        if self.analysis_process.state()==QProcess.NotRunning:return
+        self.analysis_running_signature=None;self.analysis_process.kill()
+        self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
+        self.analysis_state.setText("分析超时")
+        self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
+        self.analysis_detail.setText("规划超过20秒，请调整起终点、高度或队形后重试。")
+    def analysis_finished(self,exit_code,_exit_status):
+        self.analysis_timeout.stop()
+        signature=self.analysis_running_signature;self.analysis_running_signature=None
+        if signature is None or signature!=self.parameter_signature():return
+        stdout=bytes(self.analysis_process.readAllStandardOutput()).decode("utf-8","replace").strip()
+        stderr=bytes(self.analysis_process.readAllStandardError()).decode("utf-8","replace").strip()
+        if exit_code or not self.analysis_report or not os.path.isfile(self.analysis_report) or not os.path.isfile(self.analysis_mission):
+            detail=stderr or stdout or "规划器未生成分析报告"
+            environment_markers=("object is not callable","object is not iterable",
+                                 "keywords must be strings","Parameter' object",
+                                 "unsupported operand type")
+            if self.analysis_retry<1 and any(marker in detail for marker in environment_markers):
+                self.analysis_retry+=1;self.analysis_state.setText("环境异常，正在自动重试…")
+                self.analysis_detail.setText(detail[:320]);QTimer.singleShot(150,self.start_analysis);return
+            self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
+            self.analysis_state.setText("当前参数不可执行")
+            self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
+            self.analysis_detail.setText(self.planning_error(detail)[:700]);return
+        try:
+            with open(self.analysis_report,"r",encoding="utf-8") as stream:report=json.load(stream)
+            clearance=report["clearance_analysis"];trajectory=report["trajectory_parameterization"];stages=report["stages"]
+            available=float(clearance["minimum_horizontal_clearance_m"]);required=float(clearance["required"]["horizontal_m"]);margin=available-required
+            location=clearance.get("critical_location",["-","-","-"]);obstacle=clearance.get("critical_obstacle") or "世界边界"
+            self.analysis_state.setText("规划可行 · 净空安全余量 {:.2f} m".format(margin))
+            color="#66bb6a" if margin>=.5 else "#ffb74d";border="#376c3a" if margin>=.5 else "#8a6530"
+            self.analysis_state.setStyleSheet("color:{};border-color:{};".format(color,border))
+            self.analysis_detail.setText(
+                "最小水平净空 {:.2f} m / 所需 {:.2f} m；危险对象：{}，位置 ({:.1f}, {:.1f}, {:.1f})\n"
+                "地板余量 {:.2f} m，顶部余量 {:.2f} m；预计出航 {:.1f} s，最大速度 {:.2f} m/s，最大加速度 {:.2f} m/s²".format(
+                    available,required,obstacle,float(location[0]),float(location[1]),float(location[2]),
+                    float(clearance["minimum_floor_clearance_m"]),float(clearance["minimum_ceiling_clearance_m"]),
+                    float(stages["outbound_end"])-18.0,float(trajectory["actual_max_speed_mps"]),
+                    float(trajectory["actual_max_acceleration_mps2"])))
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
+            self.analysis_state.setText("分析报告无效")
+            self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
+            self.analysis_detail.setText("无法读取规划摘要：{}".format(exc));return
+        self.valid_analysis_signature=signature;self.start_sim.setEnabled(True)
     def begin_pick(self,mode):
         self.pick_mode=mode;self.state.setText("请在 RViz 工具栏选择 Publish Point，然后点击地图")
     def clicked_point_cb(self,msg):
@@ -118,12 +214,9 @@ class OperatorPlugin(Plugin):
         return "\u822a\u7ebf\u89c4\u5212\u5931\u8d25\uff1a\n"+text
     def launch_sim(self):
         if self.process.state()!=QProcess.NotRunning:QMessageBox.information(self.widget,"\u63d0\u793a","\u4eff\u771f\u5df2\u7ecf\u5728\u8fd0\u884c");return
-        sid=self.scene.currentData();pkg=rospkg.RosPack().get_path("logistics_gazebo_sim_ros");mission="/tmp/logistics_custom_mission_{}.yaml".format(os.getpid())
-        cmd=[os.path.join(pkg,"scripts","generate_missions"),"--scene",str(sid),"--start-x",str(self.start_x.value()),"--start-y",str(self.start_y.value()),"--goal-x",str(self.goal_x.value()),"--goal-y",str(self.goal_y.value()),"--altitude",str(self.altitude.value()),"--formation",self.formation.currentData(),"--output",mission]
-        try:
-            result=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,timeout=15)
-        except (OSError,subprocess.TimeoutExpired) as exc:QMessageBox.critical(self.widget,"\u89c4\u5212\u5931\u8d25","\u65e0\u6cd5\u8fd0\u884c\u822a\u7ebf\u89c4\u5212\u5668\uff1a{}".format(exc));return
-        if result.returncode or not os.path.isfile(mission):QMessageBox.warning(self.widget,"\u89c4\u5212\u5931\u8d25",self.planning_error(result.stderr.strip() or result.stdout.strip()));return
+        if self.valid_analysis_signature!=self.parameter_signature() or not self.analysis_mission or not os.path.isfile(self.analysis_mission):
+            QMessageBox.warning(self.widget,"规划尚未就绪","当前参数还没有通过三维规划与净空分析，请等待分析完成或调整参数。");self.schedule_analysis();return
+        sid=self.scene.currentData();mission=self.analysis_mission
         self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.process.start("setsid",["roslaunch"]+args);self.state.setText("\u89c4\u5212\u6210\u529f\uff0c\u4eff\u771f\u542f\u52a8\u4e2d")
     def stop_simulation(self):
@@ -146,4 +239,7 @@ class OperatorPlugin(Plugin):
     def diag_cb(self,msg):
         if not msg.status:return
         s=msg.status[0];v={x.key:x.value for x in s.values};self.safety.setText("{} | \u95f4\u8ddd {}m | \u51c0\u7a7a {}m | \u8bef\u5dee {}m".format(s.message,v.get("min_separation_m","-"),v.get("min_obstacle_clearance_m","-"),v.get("max_tracking_error_m","-")));self.safety.setStyleSheet("color:{}".format("#c62828" if s.level>=2 else "#ef6c00" if s.level==1 else "#2e7d32"))
-    def shutdown_plugin(self):self.stop_simulation()
+    def shutdown_plugin(self):
+        self.analysis_timer.stop();self.analysis_timeout.stop()
+        if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)
+        self.stop_simulation()
