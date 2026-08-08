@@ -19,6 +19,7 @@ class DynamicRiskMonitor:
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
         self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
+        self.orca_required_clearance = float(rospy.get_param("~orca_required_clearance_m", 0.5))
         self.local_avoidance_algorithm = str(rospy.get_param(
             "~local_avoidance_algorithm", "collective_offset"))
         sx = float(rospy.get_param("~spawn_x", -40.0))

@@ -103,9 +103,11 @@ class Orca3DPlanner(LocalAvoidancePlanner):
         step=float(options.get("time_step",0.2))
         radius=float(options.get("vehicle_radius",1.2))
         separation=float(options.get("minimum_separation",3.0))
+        safety_buffer=float(options.get("safety_buffer",0.5))
+        required_clearance=float(options.get("required_clearance",0.5))
         lookahead=float(options.get("preferred_velocity_lookahead",1.0))
         if not 1<=count<=32:raise DynamicObstacleError("ORCA vehicle_count must be 1..32")
-        if min(max_speed,horizon,step,radius,separation,lookahead)<=0.0:
+        if min(max_speed,horizon,step,radius,separation,lookahead)<=0.0 or min(safety_buffer,required_clearance)<0.0:
             raise DynamicObstacleError("ORCA limits must be positive")
         states=[_path_state(path,lookahead) for path in paths]
         positions=[value[0] for value in states]
@@ -131,7 +133,7 @@ class Orca3DPlanner(LocalAvoidancePlanner):
                 relative_velocity=preferred[index]-obstacle["velocity"]
                 correction,normal=_avoidance_correction(
                     relative_position,relative_velocity,
-                    radius+obstacle["radius"],horizon,step)
+                    radius+obstacle["radius"]+safety_buffer+required_clearance,horizon,step)
                 planes.append((preferred[index]+correction,normal,obstacle["id"]))
             velocity=preferred[index].copy()
             for _ in range(2):
@@ -155,16 +157,31 @@ class Orca3DPlanner(LocalAvoidancePlanner):
                 for second in range(first+1,count):
                     minimum_pair=min(minimum_pair,float(np.linalg.norm(future[first]-future[second])))
         required=max(separation,2.0*radius)
-        constraints_satisfied=(count<2 or minimum_pair>=required-0.05)
+        minimum_obstacle=float("inf")
+        for seconds in sample_times:
+            for index,(position,velocity) in enumerate(zip(positions,velocities)):
+                future=position+velocity*seconds
+                for obstacle in checked:
+                    obstacle_future=obstacle["position"]+obstacle["velocity"]*seconds
+                    clearance=float(np.linalg.norm(future-obstacle_future))-(
+                        radius+obstacle["radius"]+safety_buffer+required_clearance)
+                    minimum_obstacle=min(minimum_obstacle,clearance)
+        pair_safe=(count<2 or minimum_pair>=required-0.05)
+        obstacle_safe=(not checked or minimum_obstacle>=-0.05)
+        constraints_satisfied=pair_safe and obstacle_safe
+        rejections={}
+        if not pair_safe:rejections["VEHICLE_SEPARATION"]=1
+        if not obstacle_safe:rejections["DYNAMIC_CLEARANCE"]=1
         return {"viable":bool(constraints_satisfied),"algorithm":self.name,
             "command_type":self.command_type,"vehicle_count":count,
             "commands":commands,"selected_offset":None,
             "minimum_clearance_m":None,"candidates":[],
             "predicted_minimum_separation_m":(None if count<2 else round(minimum_pair,4)),
+            "predicted_minimum_obstacle_clearance_m":(None if not checked else round(minimum_obstacle,4)),
             "constraints_satisfied":bool(constraints_satisfied),
             "reason":("3D ORCA velocity solution generated in shadow mode" if constraints_satisfied
                       else "3D ORCA could not satisfy fleet separation; hold required"),
-            "shadow_mode":True,"rejection_summary":({} if constraints_satisfied else {"VEHICLE_SEPARATION":1})}
+            "shadow_mode":True,"rejection_summary":rejections}
 
 
 _PLANNERS={value.name:value for value in (CollectiveOffsetPlanner,Orca3DPlanner)}
