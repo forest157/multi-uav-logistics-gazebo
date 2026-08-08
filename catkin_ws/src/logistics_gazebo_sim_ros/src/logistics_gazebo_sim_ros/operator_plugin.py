@@ -281,7 +281,16 @@ class OperatorPlugin(Plugin):
         self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.process.start("setsid",["roslaunch"]+args);self.state.setText("\u89c4\u5212\u6210\u529f\uff0c\u4eff\u771f\u542f\u52a8\u4e2d")
     def stop_simulation(self):
-        if self.process.state()==QProcess.NotRunning:return
+        if self.process.state()==QProcess.NotRunning:
+            result=QProcess.execute("pkill",["-INT","-f",
+                "[r]oslaunch.*three_uav_mission.launch"])
+            if result==0:
+                self.state.setText("正在停止外部三机仿真…")
+                QTimer.singleShot(5000,self.force_stop_external_simulation)
+            else:
+                self.state.setText("没有检测到运行中的三机仿真")
+            return
+        self.state.setText("正在停止三机仿真…")
         try:os.killpg(int(self.process.processId()),signal.SIGINT)
         except (OSError,ProcessLookupError):self.process.terminate()
         QTimer.singleShot(5000,self.force_stop_simulation)
@@ -289,6 +298,12 @@ class OperatorPlugin(Plugin):
         if self.process.state()==QProcess.NotRunning:return
         try:os.killpg(int(self.process.processId()),signal.SIGTERM)
         except (OSError,ProcessLookupError):self.process.kill()
+    def force_stop_external_simulation(self):
+        if QProcess.execute("pgrep",["-f",
+                "[r]oslaunch.*three_uav_mission.launch"])==0:
+            QProcess.execute("pkill",["-TERM","-f",
+                "[r]oslaunch.*three_uav_mission.launch"])
+        else:self.state.setText("三机仿真已停止")
     def call(self,name):
         try:r=rospy.ServiceProxy(name,Trigger)();self.state.setText(r.message)
         except rospy.ServiceException as exc:QMessageBox.warning(self.widget,"\u670d\u52a1\u8c03\u7528\u5931\u8d25",str(exc))
