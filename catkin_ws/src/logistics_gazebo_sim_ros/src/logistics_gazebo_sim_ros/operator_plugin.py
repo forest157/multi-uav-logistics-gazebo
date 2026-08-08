@@ -8,7 +8,8 @@ from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import Point, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim_ros.scenes import SCENES, SCALE, metric_xy
-from python_qt_binding.QtCore import QObject, QProcess, QTimer, Signal
+from python_qt_binding.QtCore import QObject, QProcess, Qt, QTimer, Signal
+from python_qt_binding.QtGui import QPixmap
 from python_qt_binding.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget)
 from qt_gui.plugin import Plugin
@@ -27,8 +28,18 @@ class OperatorPlugin(Plugin):
     def __init__(self, context):
         super().__init__(context); self.setObjectName("LogisticsOperator")
         self.widget=QWidget();self.widget.setWindowTitle("无人机物流仿真上位机");self.widget.setMinimumWidth(680);root=QVBoxLayout(self.widget);root.setContentsMargins(16,14,16,16);root.setSpacing(10)
-        title=QLabel("三机物流任务控制台 · ROS OMPL 3D 实验版");title.setObjectName("title");subtitle=QLabel("场景预览 · 地图选点 · 低空避障 · 编队往返");subtitle.setObjectName("subtitle");root.addWidget(title);root.addWidget(subtitle)
-        style_path=os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim_ros"),"config","operator.qss")
+        package_path=rospkg.RosPack().get_path("logistics_gazebo_sim_ros")
+        header=QHBoxLayout();header.setSpacing(14)
+        logo=QLabel();logo.setObjectName("brandLogo");logo.setFixedSize(84,84);logo.setAlignment(Qt.AlignCenter)
+        logo_path=os.path.join(package_path,"resources","nuaa.jpg");pixmap=QPixmap(logo_path)
+        if pixmap.isNull():
+            logo.setText("NUAA");rospy.logwarn("Unable to load rqt branding image: %s",logo_path)
+        else:
+            logo.setPixmap(pixmap.scaled(80,80,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        heading=QVBoxLayout();heading.setSpacing(3)
+        title=QLabel("三机物流任务控制台 · ROS OMPL 3D 实验版");title.setObjectName("title");subtitle=QLabel("场景预览 · 地图选点 · 低空避障 · 编队往返");subtitle.setObjectName("subtitle")
+        heading.addStretch();heading.addWidget(title);heading.addWidget(subtitle);heading.addStretch();header.addWidget(logo);header.addLayout(heading,1);root.addLayout(header)
+        style_path=os.path.join(package_path,"config","operator.qss")
         with open(style_path,"r",encoding="utf-8") as style_file:self.widget.setStyleSheet(style_file.read())
         box=QGroupBox("\u4eff\u771f\u4e0e\u89c4\u5212"); form=QFormLayout(box)
         self.scene=QComboBox()

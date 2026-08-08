@@ -10,5 +10,5 @@ target_link_libraries(ompl_3d_planner ${catkin_LIBRARIES} ${OMPL_LIBRARIES})
 install(TARGETS ompl_3d_planner RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 catkin_install_python(PROGRAMS scripts/generate_worlds scripts/generate_missions scripts/gazebo_marker_sync scripts/offboard_controller scripts/fleet_mission_player scripts/fleet_safety_monitor scripts/fleet_visualizer scripts/mission_recorder scripts/parcel_delivery_manager
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-install(DIRECTORY launch config worlds DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+install(DIRECTORY launch config worlds resources DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 install(FILES plugin.xml DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
