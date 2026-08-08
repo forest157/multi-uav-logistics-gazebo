@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Physical parcel carry and release for the three-UAV Gazebo mission."""
+import json
+import rospy
+from gazebo_msgs.msg import ModelState
+from gazebo_msgs.srv import DeleteModel, GetLinkProperties, GetModelState, SetLinkProperties, SetModelState, SpawnModel
+from std_msgs.msg import String
+
+COLORS=("Gazebo/Orange","Gazebo/Yellow","Gazebo/Red")
+UAV_MODELS=("iris0","iris1","iris2")
+
+def parcel_sdf(name,material,static):
+    return """<?xml version="1.0"?><sdf version="1.6"><model name="%s"><static>%s</static><link name="parcel_link"><gravity>%s</gravity><self_collide>false</self_collide><velocity_decay><linear>0.12</linear><angular>0.45</angular></velocity_decay><inertial><mass>0.50</mass><inertia><ixx>0.0098</ixx><iyy>0.0131</iyy><izz>0.0160</izz></inertia></inertial><collision name="collision"><geometry><box><size>0.46 0.36 0.26</size></box></geometry><surface><friction><ode><mu>1.2</mu><mu2>1.2</mu2><slip1>0.0</slip1><slip2>0.0</slip2></ode></friction><bounce><restitution_coefficient>0.0</restitution_coefficient><threshold>1000.0</threshold></bounce><contact><collide_without_contact>false</collide_without_contact><ode><kp>30000</kp><kd>500</kd><max_vel>0.02</max_vel><min_depth>0.003</min_depth></ode></contact></surface></collision><visual name="box"><geometry><box><size>0.48 0.38 0.30</size></box></geometry><material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>%s</name></script></material></visual><visual name="strap_x"><pose>0 0 0.156 0 0 0</pose><geometry><box><size>0.50 0.045 0.015</size></box></geometry><material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Black</name></script></material></visual><visual name="strap_y"><pose>0 0 0.157 0 0 0</pose><geometry><box><size>0.045 0.40 0.016</size></box></geometry><material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Black</name></script></material></visual></link></model></sdf>"""%(name,"false","false",material)
+
+class ParcelDelivery:
+    def __init__(self):
+        self.names=["delivery_parcel_%d"%i for i in range(3)]
+        self.attached=[False]*3;self.released=False;self.settled=[False]*3;self.release_time=None;self.last_elapsed=0.0
+        self.spawn=rospy.ServiceProxy("/gazebo/spawn_sdf_model",SpawnModel)
+        self.delete=rospy.ServiceProxy("/gazebo/delete_model",DeleteModel)
+        self.get_state=rospy.ServiceProxy("/gazebo/get_model_state",GetModelState)
+        self.get_link=rospy.ServiceProxy("/gazebo/get_link_properties",GetLinkProperties)
+        self.set_link=rospy.ServiceProxy("/gazebo/set_link_properties",SetLinkProperties)
+        self.set_state=rospy.ServiceProxy("/gazebo/set_model_state",SetModelState)
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=5)
+        rospy.Timer(rospy.Duration(0.05),self.follow)
+        rospy.loginfo("Parcel delivery manager ready")
+    def safe_delete(self,name):
+        try:self.delete(name)
+        except rospy.ServiceException:pass
+    def spawn_one(self,i,pose,static):
+        try:return self.spawn(self.names[i],parcel_sdf(self.names[i],COLORS[i],static),"",pose,"world").success
+        except rospy.ServiceException as exc:
+            rospy.logwarn_throttle(5.0,"Parcel spawn failed: %s",exc);return False
+    def set_gravity(self,name,enabled):
+        link=name+"::parcel_link";p=self.get_link(link)
+        return self.set_link(link,p.com,enabled,p.mass,p.ixx,p.ixy,p.ixz,p.iyy,p.iyz,p.izz).success
+    def attach_all(self):
+        for i,model in enumerate(UAV_MODELS):
+            if self.attached[i]:continue
+            existing=self.get_state(self.names[i],"world")
+            if existing.success:
+                try:self.attached[i]=self.set_gravity(self.names[i],False)
+                except rospy.ServiceException:continue
+                if self.attached[i]:continue
+            state=self.get_state(model,"world")
+            if not state.success or state.pose.position.z<0.8:continue
+            pose=state.pose;pose.position.z-=0.60
+            self.attached[i]=self.spawn_one(i,pose,False)
+        if all(self.attached):
+            self.released=False;rospy.loginfo("Three parcels attached to the fleet")
+    def release_all(self):
+        if self.released:return
+        released=0
+        for i,name in enumerate(self.names):
+            try:
+                link=name+"::parcel_link"
+                if self.set_gravity(name,True):self.attached[i]=False;released+=1
+            except rospy.ServiceException as exc:rospy.logwarn("Parcel release failed for %s: %s",name,exc)
+        if released==len(self.names):
+            self.released=True;self.settled=[False]*3;self.release_time=rospy.Time.now();rospy.loginfo("DELIVERY COMPLETE: all physical parcels released")
+        elif released:rospy.logwarn("Partial parcel release: %d of %d",released,len(self.names))
+    def state_cb(self,msg):
+        try:
+            data=json.loads(msg.data);elapsed=float(data.get("elapsed",0.0));phase=data.get("phase","")
+        except (ValueError,TypeError):return
+        if elapsed+0.5<self.last_elapsed or (phase=="TAKEOFF_HOLD" and self.released):
+            self.released=False;self.settled=[False]*3;self.release_time=None;self.attached=[False]*3;self.attach_all()
+        self.last_elapsed=elapsed
+        if phase=="DELIVERY_RELEASE":self.release_all()
+    def settle_released(self):
+        if self.release_time is None or (rospy.Time.now()-self.release_time).to_sec()<0.25:return
+        for i,name in enumerate(self.names):
+            if self.settled[i]:continue
+            state=self.get_state(name,"world")
+            if not state.success or state.pose.position.z>0.19:continue
+            target=ModelState();target.model_name=name;target.reference_frame="world";target.pose=state.pose;target.pose.position.z=0.15;target.pose.orientation.x=target.pose.orientation.y=target.pose.orientation.z=0.0;target.pose.orientation.w=1.0
+            self.set_state(target);self.set_gravity(name,False);self.settled[i]=True
+            rospy.loginfo("Parcel %d settled at delivery zone",i)
+    def follow(self,_event):
+        if self.released:
+            try:self.settle_released()
+            except rospy.ServiceException:pass
+            return
+        if not all(self.attached):
+            try:self.attach_all()
+            except rospy.ServiceException:return
+        for i,model in enumerate(UAV_MODELS):
+            if not self.attached[i]:continue
+            state=self.get_state(model,"world")
+            if not state.success:continue
+            target=ModelState();target.model_name=self.names[i];target.reference_frame="world";target.pose=state.pose;target.pose.position.z-=0.60;target.twist=state.twist
+            try:self.set_state(target)
+            except rospy.ServiceException:self.attached[i]=False
+if __name__=="__main__":
+    rospy.init_node("parcel_delivery_manager");ParcelDelivery();rospy.spin()

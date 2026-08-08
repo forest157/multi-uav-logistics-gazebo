@@ -1,0 +1,9 @@
+<launch>
+  <arg name="namespace" default="uav0"/>
+  <arg name="x" default="0.0"/><arg name="y" default="0.0"/><arg name="z" default="5.0"/>
+  <group ns="$(arg namespace)">
+    <node pkg="logistics_gazebo_sim_ros" type="offboard_controller" name="offboard_controller" output="screen">
+      <param name="x" value="$(arg x)"/><param name="y" value="$(arg y)"/><param name="z" value="$(arg z)"/>
+    </node>
+  </group>
+</launch>

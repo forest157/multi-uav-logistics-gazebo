@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Read-only fleet tracking, separation and 3D obstacle-clearance monitor."""
+import math
+import rospy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import Header
+from mavros_msgs.msg import State
+from logistics_gazebo_sim.scenes import SCALE, SCENES, metric_xy
+
+
+SPAWNS = [(-42.0, -40.0), (-40.0, -40.0), (-38.0, -40.0)]
+
+
+def box_distance(px, py, pz, x, y, width, depth, height):
+    cx, cy = metric_xy((x + width/2.0, y + depth/2.0))
+    dx = max(abs(px-cx)-width*SCALE/2.0, 0.0)
+    dy = max(abs(py-cy)-depth*SCALE/2.0, 0.0)
+    dz = max(pz-height, 0.0) if pz > height else 0.0
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+
+
+def obstacle_distance(position, obstacle):
+    px, py, pz = position
+    if obstacle["kind"] == "box":
+        return box_distance(px, py, pz, obstacle["x"], obstacle["y"],
+                            obstacle["w"], obstacle["d"], obstacle["height"])
+    if obstacle["kind"] == "cylinder":
+        cx, cy = metric_xy((obstacle["x"], obstacle["y"]))
+        horizontal = max(math.hypot(px-cx, py-cy)-obstacle["radius"]*SCALE, 0.0)
+        vertical = max(pz-obstacle["height"], 0.0) if pz > obstacle["height"] else 0.0
+        return math.hypot(horizontal, vertical)
+    return min(box_distance(px, py, pz, x, y, w, d, obstacle["height"])
+               for x, y, w, d in obstacle["rects"])
+
+
+class SafetyMonitor:
+    def __init__(self):
+        self.count = rospy.get_param("~vehicle_count", 3)
+        self.scene = SCENES[int(rospy.get_param("~scene_id", 0))]
+        self.min_separation_limit = rospy.get_param("~min_separation", 1.5)
+        self.min_clearance_limit = rospy.get_param("~min_obstacle_clearance", 1.0)
+        self.max_tracking_error = rospy.get_param("~max_tracking_error", 1.0)
+        sx, sy = float(rospy.get_param("~spawn_x", -40.0)), float(rospy.get_param("~spawn_y", -40.0))
+        self.spawns = [(sx-3.0,sy),(sx,sy),(sx+3.0,sy)]
+        self.poses, self.targets = [None]*self.count, [None]*self.count
+        self.ready = [False] * self.count
+        for i in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i), PoseStamped,
+                             self._pose_cb, callback_args=i, queue_size=1)
+            rospy.Subscriber("/uav{}/mavros/state".format(i), State, self._state_cb, callback_args=i, queue_size=1)
+            rospy.Subscriber("/uav{}/target_pose".format(i), PoseStamped,
+                             self._target_cb, callback_args=i, queue_size=1)
+        self.publisher = rospy.Publisher("/fleet/diagnostics", DiagnosticArray, queue_size=5)
+
+    def _state_cb(self, msg, index): self.ready[index] = msg.connected and msg.armed and msg.mode == "OFFBOARD"
+    def _pose_cb(self, msg, index): self.poses[index] = msg.pose.position
+    def _target_cb(self, msg, index): self.targets[index] = msg.pose.position
+
+    def world_positions(self):
+        return [(pose.x+self.spawns[i][0], pose.y+self.spawns[i][1], pose.z)
+                for i, pose in enumerate(self.poses)]
+
+    def sample(self):
+        if any(p is None for p in self.poses) or any(t is None for t in self.targets):
+            return None
+        world = self.world_positions()
+        separation = min(math.dist(world[i], world[j]) for i in range(self.count)
+                         for j in range(i+1, self.count))
+        clearance = min(obstacle_distance(position, obstacle) for position in world
+                        for obstacle in self.scene["obstacles"])
+        errors = [math.sqrt((p.x-t.x)**2+(p.y-t.y)**2+(p.z-t.z)**2)
+                  for p, t in zip(self.poses, self.targets)]
+        return separation, clearance, max(errors), errors
+
+    def run(self):
+        rate = rospy.Rate(5)
+        while not rospy.is_shutdown():
+            sample = self.sample()
+            if sample:
+                separation, clearance, max_error, errors = sample
+                level, messages = DiagnosticStatus.OK, []
+                if not all(self.ready):
+                    level, messages = DiagnosticStatus.STALE, ["fleet initializing"]
+                if all(self.ready) and separation < self.min_separation_limit:
+                    level, messages = DiagnosticStatus.ERROR, ["vehicle separation violation"]
+                if all(self.ready) and clearance < self.min_clearance_limit:
+                    level, messages = DiagnosticStatus.ERROR, messages+["obstacle clearance violation"]
+                if all(self.ready) and max_error > self.max_tracking_error and level < DiagnosticStatus.WARN:
+                    level, messages = DiagnosticStatus.WARN, messages+["tracking error high"]
+                status = DiagnosticStatus(level=level, name="logistics_fleet/safety",
+                                          hardware_id="gazebo_sitl",
+                                          message="; ".join(messages) if messages else "safe")
+                values = [("min_separation_m", separation), ("min_obstacle_clearance_m", clearance),
+                          ("max_tracking_error_m", max_error)]
+                values += [("uav{}_tracking_error_m".format(i), e) for i, e in enumerate(errors)]
+                status.values = [KeyValue(key=k, value="{:.3f}".format(v)) for k, v in values]
+                msg = DiagnosticArray(header=Header(stamp=rospy.Time.now()), status=[status])
+                self.publisher.publish(msg)
+                if level == DiagnosticStatus.ERROR:
+                    rospy.logerr_throttle(2.0, status.message)
+            rate.sleep()
+
+
+if __name__ == "__main__":
+    rospy.init_node("fleet_safety_monitor")
+    SafetyMonitor().run()

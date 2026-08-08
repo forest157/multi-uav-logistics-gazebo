@@ -1,0 +1,6 @@
+<library path="src">
+  <class name="logistics_gazebo_sim/Operator" type="logistics_gazebo_sim.operator_plugin.OperatorPlugin" base_class_type="rqt_gui_py::Plugin">
+    <description>ROS operator station for the logistics PX4/Gazebo simulation.</description>
+    <qtgui><group><label>Logistics Simulation</label></group><label>Operator Station</label><statustip>Control and monitor the fleet mission.</statustip></qtgui>
+  </class>
+</library>

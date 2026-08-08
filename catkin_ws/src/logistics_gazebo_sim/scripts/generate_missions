@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+import argparse,heapq,math,os,sys,yaml,numpy as np
+from logistics_gazebo_sim.scenes import SCENES,SCALE,metric_xy
+from logistics_gazebo_sim.trajectory_parameterization import toppra_parameterize
+ALT={0:8.,1:37.,2:12.,3:8.,4:8.,5:10.,6:12.};M=4.5;VC=2.;FORMS={"triangle":[[-3.,-3.],[0.,3.],[3.,-3.]],"inverted":[[-3.,3.],[0.,-3.],[3.,3.]],"row":[[-3.,0.],[0.,0.],[3.,0.]]}
+class PlanningError(RuntimeError):pass
+def grid(scene,alt):
+ v=np.arange(-49,50,dtype=float);x,y=np.meshgrid(v,v,indexing="ij");z=np.zeros((99,99),bool)
+ for o in scene["obstacles"]:
+  if float(o["height"])+VC<=alt:continue
+  if o["kind"]=="cylinder":
+   a=(float(o["x"])-250)*SCALE;b=(float(o["y"])-250)*SCALE;r=float(o["radius"])*SCALE+M;z|=(x-a)**2+(y-b)**2<=r*r
+  else:
+   rs=[(o["x"],o["y"],o["w"],o["d"])] if o["kind"]=="box" else o["rects"]
+   for a,b,w,d in rs:
+    a=(float(a)+float(w)/2-250)*SCALE;b=(float(b)+float(d)/2-250)*SCALE;z|=(abs(x-a)<=float(w)*SCALE/2+M)&(abs(y-b)<=float(d)*SCALE/2+M)
+ return z
+def ix(p):return int(round(p[0]))+49,int(round(p[1]))+49
+def bad(g,p):
+ i,j=ix(p);return i<0 or i>=99 or j<0 or j>=99 or bool(g[i,j])
+def plan(g,s,t):
+ s=tuple(map(lambda x:int(round(x)),s));t=tuple(map(lambda x:int(round(x)),t));q=[(0.,s)];cost={s:0.};parent={};moves=((1,0),(0,1),(-1,0),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1))
+ while q:
+  _,u=heapq.heappop(q)
+  if u==t:break
+  for dx,dy in moves:
+   v=(u[0]+dx,u[1]+dy)
+   if bad(g,v):continue
+   n=cost[u]+math.hypot(dx,dy)
+   if n<cost.get(v,1e20):cost[v]=n;parent[v]=u;heapq.heappush(q,(n+math.dist(v,t),v))
+ if t not in cost:raise PlanningError("E_NO_PATH")
+ out=[];u=t
+ while u!=s:out.append(u);u=parent[u]
+ out.append(s);return list(reversed(out))
+def clear(g,a,b):
+ n=max(1,int(math.ceil(math.dist(a,b)/.25)))
+ return all(not bad(g,(a[0]+(b[0]-a[0])*k/n,a[1]+(b[1]-a[1])*k/n)) for k in range(n+1))
+def simplify(g,p):
+ out=[p[0]];i=0
+ while i<len(p)-1:
+  j=len(p)-1
+  while j>i+1 and not clear(g,p[i],p[j]):j-=1
+  out.append(p[j]);i=j
+ return out
+def mission(sid,start=None,goal=None,formation="triangle",altitude=None):
+ scene=SCENES[sid];alt=ALT[sid] if altitude is None else float(altitude);start=metric_xy(scene["start"]) if start is None else tuple(start);goal=metric_xy(scene["goal"]) if goal is None else tuple(goal);g=grid(scene,alt)
+ if not 3<=alt<=45:raise PlanningError("E_ALTITUDE")
+ for n,p in (("START",start),("GOAL",goal)):
+  if not(-46<=p[0]<=46 and -46<=p[1]<=46):raise PlanningError("E_BOUNDARY:"+n)
+  if bad(g,p):raise PlanningError("E_BLOCKED:"+n)
+ if math.dist(start,goal)<3:raise PlanningError("E_DISTANCE")
+ raw_world=plan(g,start,goal);world=simplify(g,raw_world)
+ try:profile=toppra_parameterize(world,lambda point:bad(g,point),velocity_limit=2.0,acceleration_limit=1.0,sample_period=0.1)
+ except RuntimeError:
+  try:profile=toppra_parameterize(raw_world,lambda point:bad(g,point),velocity_limit=2.0,acceleration_limit=1.0,sample_period=0.1)
+  except RuntimeError as exc:raise PlanningError("E_TOPPRA:"+str(exc))
+ dur=profile["duration"];positions=profile["positions"]-np.asarray(start);times=18.0+profile["times"]
+ out=18+dur;row_end=out+5;lower_end=row_end+3;release_end=lower_end+4;raise_end=release_end+3;delivery=raise_end+5;ret=delivery+dur;form=ret+10;descent=form+12
+ cfg={"vehicle_count":3,"cruise_altitude":alt,"landing_altitude":.8,"ready_altitude":max(2.,alt-1.),"initial_formation":[[-3.,0.],[0.,0.],[3.,0.]],"cruise_formation":FORMS[formation],"delivery_formation":FORMS["row"],"trajectory_parameterization":{"method":"custom_cubic_bspline+toppra","velocity_limit_mps":2.0,"acceleration_limit_mps2":1.0,"actual_max_speed_mps":round(profile["max_speed"],3),"actual_max_acceleration_mps2":round(profile["max_acceleration"],3),"constraints_relaxed":bool(profile["relaxed"]),"sample_period_s":0.1},"stages":{"hold_end":8.,"departure_reconfigure_end":18.,"outbound_end":round(out,2),"delivery_row_end":round(row_end,2),"delivery_lower_end":round(lower_end,2),"delivery_release_end":round(release_end,2),"delivery_raise_end":round(raise_end,2),"delivery_hold_end":round(delivery,2),"return_end":round(ret,2),"arrival_reconfigure_start":round(ret,2),"arrival_reconfigure_end":round(form,2),"descent_end":round(descent,2)},"center_trajectory":[[round(float(t),3),round(float(p[0]),3),round(float(p[1]),3)] for t,p in zip(times,positions)]}
+ reverse_positions=positions[::-1];return_times=delivery+profile["times"]
+ cfg["return_trajectory"]=[[round(float(t),3),round(float(p[0]),3),round(float(p[1]),3)] for t,p in zip(return_times,reverse_positions)];return cfg,world
+def main():
+ p=argparse.ArgumentParser();p.add_argument("--scene",type=int);p.add_argument("--start-x",type=float);p.add_argument("--start-y",type=float);p.add_argument("--goal-x",type=float);p.add_argument("--goal-y",type=float);p.add_argument("--altitude",type=float);p.add_argument("--formation",choices=sorted(FORMS),default="triangle");p.add_argument("--output");a=p.parse_args();ids=[a.scene] if a.scene is not None else sorted(SCENES);root=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ try:
+  for sid in ids:
+   custom=None if a.start_x is None else ((a.start_x,a.start_y),(a.goal_x,a.goal_y));cfg,w=mission(sid,*(custom or (None,None)),formation=a.formation,altitude=a.altitude);path=a.output or os.path.join(root,"config","mission_scene%d.yaml"%sid)
+   with open(path,"w") as f:yaml.safe_dump(cfg,f,sort_keys=False)
+   print("OK scene=%d altitude=%.1f waypoints=%d"%(sid,cfg["cruise_altitude"],len(w)))
+ except Exception as e:print("ERROR "+str(e),file=sys.stderr);return 2
+ return 0
+if __name__=="__main__":sys.exit(main())

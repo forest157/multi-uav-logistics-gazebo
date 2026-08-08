@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Generate 3D fleet missions with ROS OMPL + PathSimplifier + TOPPRA."""
+import argparse
+import math
+import os
+import subprocess
+import sys
+import tempfile
+import yaml
+import numpy as np
+import roslib.packages
+from logistics_gazebo_sim_ros.scenes import SCENES,SCALE,metric_xy
+from logistics_gazebo_sim_ros.trajectory_parameterization import toppra_parameterize_3d
+from logistics_gazebo_sim_ros.formation_3d import FORMATION_NAMES,assign_slots,envelope,generate,initial_line,minimum_separation
+
+ALT={0:8.,1:37.,2:12.,3:8.,4:8.,5:10.,6:12.}
+MARGIN_XY=4.5
+MARGIN_Z=2.0
+FORMS={"triangle":[[-3.,-3.],[0.,3.],[3.,-3.]],
+       "inverted":[[-3.,3.],[0.,-3.],[3.,3.]],
+       "row":[[-3.,0.],[0.,0.],[3.,0.]]}
+
+class PlanningError(RuntimeError):pass
+
+def obstacle_specs(scene,margin_xy=MARGIN_XY,margin_z=MARGIN_Z):
+    result=[]
+    for obstacle in scene["obstacles"]:
+        height=float(obstacle["height"])+margin_z
+        if obstacle["kind"]=="cylinder":
+            x=(float(obstacle["x"])-250)*SCALE
+            y=(float(obstacle["y"])-250)*SCALE
+            radius=float(obstacle["radius"])*SCALE+margin_xy
+            result.append(("cylinder",x,y,radius,0.0,height))
+        else:
+            rectangles=[(obstacle["x"],obstacle["y"],obstacle["w"],obstacle["d"])] if obstacle["kind"]=="box" else obstacle["rects"]
+            for x,y,width,depth in rectangles:
+                cx=(float(x)+float(width)/2-250)*SCALE
+                cy=(float(y)+float(depth)/2-250)*SCALE
+                result.append(("box",cx,cy,float(width)*SCALE/2+margin_xy,
+                               float(depth)*SCALE/2+margin_xy,height))
+    return result
+
+def blocked(specs,point):
+    x,y,z=point
+    if not(-46<=x<=46 and -46<=y<=46 and 3<=z<=45):return True
+    for kind,cx,cy,a,b,height in specs:
+        if z>height:continue
+        if kind=="cylinder" and (x-cx)**2+(y-cy)**2<=a*a:return True
+        if kind=="box" and abs(x-cx)<=a and abs(y-cy)<=b:return True
+    return False
+
+def planner_executable():
+    nodes=roslib.packages.find_node("logistics_gazebo_sim_ros","ompl_3d_planner")
+    if not nodes:raise PlanningError("E_OMPL_BINARY")
+    return nodes[0]
+
+def ompl_plan(start,goal,altitude,specs,z_low,z_high):
+    obstacle_file=tempfile.NamedTemporaryFile(mode="w",suffix=".csv",delete=False)
+    output_file=tempfile.NamedTemporaryFile(suffix=".csv",delete=False)
+    output_file.close()
+    try:
+        for row in specs:obstacle_file.write(",".join(map(str,row))+"\n")
+        obstacle_file.close()
+        command=[planner_executable(),str(start[0]),str(start[1]),str(altitude),
+                 str(goal[0]),str(goal[1]),str(altitude),
+                 obstacle_file.name,output_file.name,str(z_low),str(z_high),"3.0"]
+        result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                              universal_newlines=True,timeout=12)
+        if result.returncode:
+            raise PlanningError("E_OMPL_NO_PATH:"+(result.stderr.strip() or result.stdout.strip()))
+        path=np.loadtxt(output_file.name,delimiter=",",ndmin=2)
+        if path.shape[1]!=3 or len(path)<4:raise PlanningError("E_OMPL_OUTPUT")
+        return path,result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        raise PlanningError("E_OMPL_TIMEOUT")
+    finally:
+        for path in (obstacle_file.name,output_file.name):
+            try:os.unlink(path)
+            except OSError:pass
+
+def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,vehicle_count=3,spacing=3.0):
+    if scene_id not in SCENES:raise PlanningError("E_SCENE")
+    scene=SCENES[scene_id]
+    altitude=ALT[scene_id] if altitude is None else float(altitude)
+    start=metric_xy(scene["start"]) if start is None else tuple(start)
+    goal=metric_xy(scene["goal"]) if goal is None else tuple(goal)
+    if not 3<=altitude<=45:raise PlanningError("E_ALTITUDE")
+    if math.dist(start,goal)<3:raise PlanningError("E_DISTANCE")
+    initial=initial_line(vehicle_count,spacing);cruise=assign_slots(initial,generate(formation,vehicle_count,spacing));delivery=assign_slots(cruise,generate("row",vehicle_count,spacing));margin_xy,below,above=envelope(cruise);specs=obstacle_specs(scene,margin_xy,below)
+    for name,point in (("START",(start[0],start[1],altitude)),
+                       ("GOAL",(goal[0],goal[1],altitude))):
+        if blocked(specs,point):raise PlanningError("E_BLOCKED:"+name)
+
+    last_error=None
+    for _ in range(3):
+        path,planner_status=ompl_plan(start,goal,altitude,specs,3.0+below,45.0-above)
+        try:
+            profile=toppra_parameterize_3d(
+                path,lambda point:blocked(specs,point),
+                velocity_limit=2.0,acceleration_limit=1.0,sample_period=0.1)
+            break
+        except RuntimeError as exc:last_error=exc
+    else:raise PlanningError("E_TOPPRA:"+str(last_error))
+
+    duration=profile["duration"]
+    positions=profile["positions"].copy()
+    positions[:,0]-=start[0];positions[:,1]-=start[1]
+    times=18.0+profile["times"]
+    outbound_end=18.0+duration
+    delivery_row_end=outbound_end+5
+    delivery_lower_end=delivery_row_end+3
+    delivery_release_end=delivery_lower_end+4
+    delivery_raise_end=delivery_release_end+3
+    delivery_end=delivery_raise_end+5
+    return_end=delivery_end+duration
+    formation_end=return_end+10
+    descent_end=formation_end+12
+    stages={"hold_end":8.,"departure_reconfigure_end":18.,
+            "outbound_end":round(outbound_end,3),
+            "delivery_row_end":round(delivery_row_end,3),
+            "delivery_lower_end":round(delivery_lower_end,3),
+            "delivery_release_end":round(delivery_release_end,3),
+            "delivery_raise_end":round(delivery_raise_end,3),
+            "delivery_hold_end":round(delivery_end,3),
+            "return_end":round(return_end,3),
+            "arrival_reconfigure_start":round(return_end,3),
+            "arrival_reconfigure_end":round(formation_end,3),
+            "descent_end":round(descent_end,3)}
+    cfg={"vehicle_count":vehicle_count,"cruise_altitude":altitude,"landing_altitude":.8,
+         "ready_altitude":max(2.,altitude-1.),
+         "initial_formation":initial.tolist(),
+         "cruise_formation":cruise.tolist(),"delivery_formation":delivery.tolist(),
+         "formation":{"type":formation,"spacing_m":spacing,"minimum_separation_m":round(float(minimum_separation(cruise)),3),"horizontal_envelope_m":round(margin_xy,3),"below_envelope_m":round(below,3),"above_envelope_m":round(above,3)},
+         "planner":{"method":"ros_ompl_informed_rrtstar_3d",
+                    "smoother":"ompl_path_simplifier_bspline",
+                    "map_representation":"inflated_3d_obstacle_volume",
+                    "status":planner_status},
+         "trajectory_parameterization":{
+             "method":"toppra_3d","velocity_limit_mps":2.0,
+             "acceleration_limit_mps2":1.0,
+             "actual_max_speed_mps":round(profile["max_speed"],3),
+             "actual_max_acceleration_mps2":round(profile["max_acceleration"],3),
+             "constraints_relaxed":bool(profile["relaxed"]),"sample_period_s":0.1},
+         "stages":stages,
+         "center_trajectory":[[round(float(t),3),round(float(p[0]),3),
+                               round(float(p[1]),3),round(float(p[2]),3)]
+                              for t,p in zip(times,positions)]}
+    reverse_positions=positions[::-1]
+    return_times=delivery_end+profile["times"]
+    cfg["return_trajectory"]=[[round(float(t),3),round(float(p[0]),3),
+                               round(float(p[1]),3),round(float(p[2]),3)]
+                              for t,p in zip(return_times,reverse_positions)]
+    return cfg,path
+
+def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--scene",type=int);parser.add_argument("--start-x",type=float)
+    parser.add_argument("--start-y",type=float);parser.add_argument("--goal-x",type=float)
+    parser.add_argument("--goal-y",type=float);parser.add_argument("--altitude",type=float)
+    parser.add_argument("--formation",choices=FORMATION_NAMES,default="triangle")
+    parser.add_argument("--vehicle-count",type=int,default=3);parser.add_argument("--spacing",type=float,default=3.0)
+    parser.add_argument("--output");args=parser.parse_args()
+    ids=[args.scene] if args.scene is not None else sorted(SCENES)
+    root=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        for scene_id in ids:
+            custom=None if args.start_x is None else ((args.start_x,args.start_y),(args.goal_x,args.goal_y))
+            cfg,path=mission(scene_id,*(custom or (None,None)),
+                             formation=args.formation,altitude=args.altitude,vehicle_count=args.vehicle_count,spacing=args.spacing)
+            output=args.output or os.path.join(root,"config","mission_scene%d.yaml"%scene_id)
+            with open(output,"w") as stream:yaml.safe_dump(cfg,stream,sort_keys=False)
+            print("OK OMPL3D scene=%d states=%d duration=%.2f"%(
+                scene_id,len(path),cfg["stages"]["outbound_end"]-18.0))
+    except Exception as exc:
+        print("ERROR "+str(exc),file=sys.stderr);return 2
+    return 0
+if __name__=="__main__":sys.exit(main())

@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Persist mission state, safety metrics and local vehicle poses to CSV."""
+import csv, json, os, time
+import rospy
+from diagnostic_msgs.msg import DiagnosticArray
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+class Recorder:
+    def __init__(self):
+        root=os.path.expanduser(rospy.get_param("~output_dir","~/.ros/logistics_runs"));os.makedirs(root,exist_ok=True)
+        self.path=os.path.join(root,time.strftime("mission_%Y%m%d_%H%M%S.csv"))
+        self.handle=open(self.path,"w",newline="",encoding="utf-8");self.writer=csv.writer(self.handle)
+        self.writer.writerow(["ros_time","state","stage","progress","safety_level","safety_message","min_separation_m","min_clearance_m","max_tracking_error_m","uav0_x","uav0_y","uav0_z","uav1_x","uav1_y","uav1_z","uav2_x","uav2_y","uav2_z"])
+        self.state={"state":"INITIALIZING","stage":0,"progress":0.0};self.safety=["","","","",""];self.poses=[None,None,None]
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1)
+        for i in range(3):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
+        rospy.Timer(rospy.Duration(0.2),self.sample);rospy.on_shutdown(self.close);rospy.loginfo("Mission CSV: %s",self.path)
+    def state_cb(self,msg):
+        try:self.state=json.loads(msg.data)
+        except ValueError:pass
+    def diag_cb(self,msg):
+        if not msg.status:return
+        s=msg.status[0];v={x.key:x.value for x in s.values};self.safety=[s.level,s.message,v.get("min_separation_m",""),v.get("min_obstacle_clearance_m",""),v.get("max_tracking_error_m","")]
+    def pose_cb(self,msg,i):self.poses[i]=msg.pose.position
+    def sample(self,_):
+        row=[rospy.Time.now().to_sec(),self.state.get("state",""),self.state.get("stage",""),self.state.get("progress","")]+self.safety
+        for p in self.poses:row += [p.x,p.y,p.z] if p else ["","",""]
+        self.writer.writerow(row);self.handle.flush()
+    def close(self):
+        if not self.handle.closed:self.handle.close()
+if __name__=="__main__":rospy.init_node("mission_recorder");Recorder();rospy.spin()

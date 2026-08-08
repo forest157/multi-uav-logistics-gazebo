@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Minimal single-vehicle ENU position controller for PX4 v1.13/MAVROS."""
+import rospy
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import Bool
+from mavros_msgs.msg import ExtendedState, ParamValue, State
+from mavros_msgs.srv import CommandBool, ParamSet, SetMode
+
+
+class Controller:
+    def __init__(self):
+        self.state = State()
+        self.mission_complete = False
+        self.takeoff_authorized = False
+        self.landed_state = ExtendedState.LANDED_STATE_UNDEFINED
+        self.local_altitude = float("inf")
+        self.target = PoseStamped()
+        self.target.pose.position.x = rospy.get_param("~x", 0.0)
+        self.target.pose.position.y = rospy.get_param("~y", 0.0)
+        self.target.pose.position.z = rospy.get_param("~z", 5.0)
+        self.target.pose.orientation.w = 1.0
+        rospy.Subscriber("mavros/state", State, self._state_cb, queue_size=1)
+        rospy.Subscriber("target_pose", PoseStamped, self._target_cb, queue_size=1)
+        rospy.Subscriber("/fleet/mission_complete", Bool, self._complete_cb, queue_size=1)
+        rospy.Subscriber("/fleet/takeoff_authorized", Bool, self._authorization_cb, queue_size=1)
+        rospy.Subscriber("mavros/extended_state", ExtendedState, self._extended_cb, queue_size=1)
+        rospy.Subscriber("mavros/local_position/pose", PoseStamped, self._pose_cb, queue_size=1)
+        self.publisher = rospy.Publisher("mavros/setpoint_position/local", PoseStamped, queue_size=10)
+        self.arm = rospy.ServiceProxy("mavros/cmd/arming", CommandBool)
+        self.mode = rospy.ServiceProxy("mavros/set_mode", SetMode)
+        self.param_set = rospy.ServiceProxy("mavros/param/set", ParamSet)
+
+    def _pose_cb(self, msg):
+        self.local_altitude = msg.pose.position.z
+
+    def _extended_cb(self, msg):
+        self.landed_state = msg.landed_state
+
+    def _complete_cb(self, msg):
+        self.mission_complete = msg.data
+
+    def _authorization_cb(self, msg):
+        self.takeoff_authorized = msg.data
+
+    def _target_cb(self, msg):
+        self.target.pose = msg.pose
+        if self.target.pose.orientation.w == 0.0 and self.target.pose.orientation.x == 0.0 and self.target.pose.orientation.y == 0.0 and self.target.pose.orientation.z == 0.0:
+            self.target.pose.orientation.w = 1.0
+
+    def _configure_landing(self):
+        try:
+            rospy.wait_for_service("mavros/param/set",timeout=20.0)
+            for name,value in (("MPC_LAND_SPEED",0.6),("MPC_LAND_CRWL",0.3),("COM_DISARM_LAND",0.5)):
+                result=self.param_set(param_id=name,value=ParamValue(integer=0,real=value))
+                if not result.success:rospy.logwarn("PX4 rejected landing parameter %s",name)
+        except (rospy.ROSException,rospy.ServiceException) as exc:rospy.logwarn("Landing parameter setup failed: %s",exc)
+
+    def _state_cb(self, msg):
+        self.state = msg
+
+    def run(self):
+        rate = rospy.Rate(20)
+        while not rospy.is_shutdown() and not self.state.connected:
+            rate.sleep()
+        self._configure_landing()
+        # PX4 v1.13 SITL accepts offboard operation without an RC override.
+        for _ in range(100):
+            self._publish()
+            rate.sleep()
+        last_request = rospy.Time(0)
+        while not rospy.is_shutdown():
+            now = rospy.Time.now()
+            if self.mission_complete and self.state.armed and self.state.mode != "AUTO.LAND" and now - last_request > rospy.Duration(2):
+                try:
+                    self.mode(custom_mode="AUTO.LAND")
+                except rospy.ServiceException as exc:
+                    rospy.logwarn("AUTO.LAND request failed: %s", exc)
+                last_request = now
+            elif self.mission_complete and self.state.armed and (self.landed_state == ExtendedState.LANDED_STATE_ON_GROUND or self.local_altitude <= 0.22) and now - last_request > rospy.Duration(0.2):
+                try:
+                    self.arm(False)
+                except rospy.ServiceException as exc:
+                    rospy.logwarn("Ground disarm request failed: %s", exc)
+                last_request = now
+            elif self.takeoff_authorized and not self.mission_complete and self.state.mode != "OFFBOARD" and now - last_request > rospy.Duration(2):
+                try:
+                    self.mode(custom_mode="OFFBOARD")
+                except rospy.ServiceException as exc:
+                    rospy.logwarn("OFFBOARD request failed: %s", exc)
+                last_request = now
+            elif self.takeoff_authorized and not self.mission_complete and not self.state.armed and now - last_request > rospy.Duration(2):
+                try:
+                    self.arm(True)
+                except rospy.ServiceException as exc:
+                    rospy.logwarn("Arming request failed: %s", exc)
+                last_request = now
+            self._publish()
+            rate.sleep()
+
+    def _publish(self):
+        self.target.header.stamp = rospy.Time.now()
+        self.target.header.frame_id = "map"
+        self.publisher.publish(self.target)
+
+
+if __name__ == "__main__":
+    rospy.init_node("offboard_controller")
+    Controller().run()

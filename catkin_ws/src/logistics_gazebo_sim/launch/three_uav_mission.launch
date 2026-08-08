@@ -1,0 +1,33 @@
+<launch>
+  <arg name="scene_id" default="0"/>
+  <arg name="gui" default="true"/>
+  <arg name="gazebo_master_uri" default="http://127.0.0.1:11450"/>
+  <arg name="mission_config" default="$(find logistics_gazebo_sim)/config/mission_scene0.yaml"/>
+  <arg name="auto_start" default="true"/>
+  <arg name="target_z" default="5.0"/>
+  <arg name="spawn_x" default="-40.0"/>
+  <arg name="spawn_y" default="-40.0"/>
+  <arg name="goal_x" default="45.0"/>
+  <arg name="goal_y" default="45.0"/>
+  <include file="$(find logistics_gazebo_sim)/launch/three_uav_sitl.launch">
+    <arg name="scene_id" value="$(arg scene_id)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="target_z" value="$(arg target_z)"/>
+    <arg name="gazebo_master_uri" value="$(arg gazebo_master_uri)"/>
+    <arg name="spawn_x" value="$(arg spawn_x)"/><arg name="spawn_y" value="$(arg spawn_y)"/>
+  </include>
+  <node pkg="logistics_gazebo_sim" type="fleet_mission_player" name="fleet_mission_player" output="screen">
+    <param name="config" value="$(arg mission_config)"/>
+    <param name="auto_start" value="$(arg auto_start)"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="fleet_safety_monitor" name="fleet_safety_monitor" output="screen">
+    <param name="vehicle_count" value="3"/><param name="scene_id" value="$(arg scene_id)"/>
+    <param name="min_separation" value="2.2"/><param name="min_obstacle_clearance" value="1.0"/>
+    <param name="max_tracking_error" value="1.0"/>
+    <param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="fleet_visualizer" name="fleet_visualizer" output="screen"><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/></node>
+  <node pkg="logistics_gazebo_sim" type="mission_recorder" name="mission_recorder" output="screen"/>
+  <node pkg="logistics_gazebo_sim" type="parcel_delivery_manager" name="parcel_delivery_manager" output="screen"/>
+  <node pkg="logistics_gazebo_sim" type="gazebo_marker_sync" name="gazebo_marker_sync" output="screen"><param name="start_x" value="$(arg spawn_x)"/><param name="start_y" value="$(arg spawn_y)"/><param name="goal_x" value="$(arg goal_x)"/><param name="goal_y" value="$(arg goal_y)"/></node>
+</launch>

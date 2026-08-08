@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""YAML-configured round-trip fleet mission with synchronized lifecycle services."""
+import json, os
+import rospy, rospkg, yaml
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import State
+from std_msgs.msg import Bool, String
+from std_srvs.srv import Trigger, TriggerResponse
+
+def smoothstep(v):
+    v=max(0.0,min(1.0,v));return v*v*(3.0-2.0*v)
+def lerp(a,b,r):return a+(b-a)*r
+
+class MissionPlayer:
+    def __init__(self):
+        default=os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim"),"config","mission_scene0.yaml")
+        with open(rospy.get_param("~config",default),"r",encoding="utf-8") as stream:self.cfg=yaml.safe_load(stream)
+        self.count=int(self.cfg["vehicle_count"]);self.initial=[tuple(v) for v in self.cfg["initial_formation"]];self.cruise=[tuple(v) for v in self.cfg["cruise_formation"]];self.delivery=[tuple(v) for v in self.cfg.get("delivery_formation",[[-3.0,0.0],[0.0,0.0],[3.0,0.0]])]
+        self.outbound=[tuple(v) for v in self.cfg["center_trajectory"]]
+        self.return_keys=[tuple(v) for v in self.cfg.get("return_trajectory",[])]
+        if not self.return_keys:raise ValueError("return_trajectory is required for round-trip missions")
+        if not(self.count==len(self.initial)==len(self.cruise)==len(self.delivery)):raise ValueError("Formation sizes must match vehicle_count")
+        self.pubs=[rospy.Publisher("/uav{}/target_pose".format(i),PoseStamped,queue_size=5) for i in range(self.count)]
+        self.state_pub=rospy.Publisher("/fleet/mission_state",String,queue_size=5,latch=True);self.complete_pub=rospy.Publisher("/fleet/mission_complete",Bool,queue_size=1,latch=True);self.takeoff_pub=rospy.Publisher("/fleet/takeoff_authorized",Bool,queue_size=1,latch=True)
+        self.ready,self.altitudes=[False]*self.count,[0.0]*self.count
+        for i in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/state".format(i),State,self._state_cb,callback_args=i,queue_size=1)
+            rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self._pose_cb,callback_args=i,queue_size=1)
+        self.enabled=rospy.get_param("~auto_start",True);self.paused=False;self.start_time=None;self.pause_time=None;self.last_stage=None;self.emergency_land=False
+        self.elapsed=0.0
+        rospy.Service("~start",Trigger,self._start);rospy.Service("~pause",Trigger,self._pause);rospy.Service("~resume",Trigger,self._resume);rospy.Service("~land",Trigger,self._land);rospy.Service("~reset",Trigger,self._reset)
+        self.complete_pub.publish(False);self.takeoff_pub.publish(self.enabled)
+    def _state_cb(self,msg,i):self.ready[i]=msg.connected and msg.armed and msg.mode=="OFFBOARD"
+    def _pose_cb(self,msg,i):self.altitudes[i]=msg.pose.position.z
+    def all_ready(self):return all(self.ready) and min(self.altitudes)>=float(self.cfg["ready_altitude"])
+    def _start(self,_):self.enabled,self.paused=True,False;self.takeoff_pub.publish(True);return TriggerResponse(True,"takeoff authorized; synchronized mission start requested")
+    def _pause(self,_):
+        if self.start_time is None or self.paused:return TriggerResponse(False,"mission is not running")
+        self.paused,self.pause_time=True,rospy.Time.now();return TriggerResponse(True,"mission paused")
+    def _resume(self,_):
+        if not self.paused:return TriggerResponse(False,"mission is not paused")
+        self.start_time+=rospy.Time.now()-self.pause_time;self.paused=False;return TriggerResponse(True,"mission resumed")
+    def _land(self,_):
+        self.emergency_land=True;self.enabled,self.paused=False,False;self.takeoff_pub.publish(False);self.complete_pub.publish(True);return TriggerResponse(True,"emergency landing requested")
+    def _reset(self,_):
+        self.enabled=False;self.paused=False;self.start_time=None;self.pause_time=None;self.emergency_land=False;self.elapsed=0.0;self.last_stage=None
+        self.complete_pub.publish(False);self.takeoff_pub.publish(False)
+        return TriggerResponse(True,"mission reset; takeoff authorization revoked")
+
+    def interpolate(self,keys,elapsed):
+        if elapsed<=keys[0][0]:return keys[0][1],keys[0][2]
+        for a,b in zip(keys,keys[1:]):
+            if elapsed<=b[0]:
+                r=(elapsed-a[0])/(b[0]-a[0]);return lerp(a[1],b[1],r),lerp(a[2],b[2],r)
+        return keys[-1][1],keys[-1][2]
+    def targets(self,elapsed):
+        t,cz=self.cfg["stages"],float(self.cfg["cruise_altitude"]);goal=(self.outbound[-1][1],self.outbound[-1][2]);span=t["delivery_hold_end"]-t["outbound_end"];row_end=t.get("delivery_row_end",t["outbound_end"]+span*.25);lower_end=t.get("delivery_lower_end",t["outbound_end"]+span*.4);release_end=t.get("delivery_release_end",t["outbound_end"]+span*.6);raise_end=t.get("delivery_raise_end",t["outbound_end"]+span*.75);delivery_z=max(2.0,cz-1.0)
+        if elapsed<t["hold_end"]:stage,phase,c,f,z=2,"TAKEOFF_HOLD",(0,0),self.initial,cz
+        elif elapsed<t["departure_reconfigure_end"]:
+            stage,phase,c,z=3,"DEPARTURE_FORMATION",(0,0),cz;r=smoothstep((elapsed-t["hold_end"])/(t["departure_reconfigure_end"]-t["hold_end"]))
+            f=[(lerp(a[0],b[0],r),lerp(a[1],b[1],r)) for a,b in zip(self.initial,self.cruise)]
+        elif elapsed<t["outbound_end"]:stage,phase,c,f,z=4,"OUTBOUND",self.interpolate(self.outbound,elapsed),self.cruise,cz
+        elif elapsed<row_end:
+            stage,phase,c,z=5,"DELIVERY_FORMATION",goal,cz;r=smoothstep((elapsed-t["outbound_end"])/(row_end-t["outbound_end"]));f=[(lerp(a[0],b[0],r),lerp(a[1],b[1],r)) for a,b in zip(self.cruise,self.delivery)]
+        elif elapsed<lower_end:
+            stage,phase,c,f=6,"DELIVERY_DESCENT",goal,self.delivery;r=smoothstep((elapsed-row_end)/(lower_end-row_end));z=lerp(cz,delivery_z,r)
+        elif elapsed<release_end:stage,phase,c,f,z=7,"DELIVERY_RELEASE",goal,self.delivery,delivery_z
+        elif elapsed<raise_end:
+            stage,phase,c,f=8,"DELIVERY_ASCENT",goal,self.delivery;r=smoothstep((elapsed-release_end)/(raise_end-release_end));z=lerp(delivery_z,cz,r)
+        elif elapsed<t["delivery_hold_end"]:
+            stage,phase,c,z=9,"CRUISE_REFORMATION",goal,cz;r=smoothstep((elapsed-raise_end)/(t["delivery_hold_end"]-raise_end));f=[(lerp(a[0],b[0],r),lerp(a[1],b[1],r)) for a,b in zip(self.delivery,self.cruise)]
+        elif elapsed<t["return_end"]:stage,phase,c,f,z=10,"RETURN",self.interpolate(self.return_keys,elapsed),self.cruise,cz
+        elif elapsed<t["arrival_reconfigure_end"]:
+            stage,phase,c,z=11,"HOME_FORMATION",(0,0),cz;r=smoothstep((elapsed-t["arrival_reconfigure_start"])/(t["arrival_reconfigure_end"]-t["arrival_reconfigure_start"]))
+            f=[(lerp(a[0],b[0],r),lerp(a[1],b[1],r)) for a,b in zip(self.cruise,self.initial)]
+        else:
+            stage,phase,c,f=12,"HOME_DESCENT",(0,0),self.initial;r=smoothstep((elapsed-t["arrival_reconfigure_end"])/(t["descent_end"]-t["arrival_reconfigure_end"]))
+            z=lerp(cz,float(self.cfg["landing_altitude"]),r)
+        targets=[(c[0]+rel[0]-self.initial[i][0],c[1]+rel[1]-self.initial[i][1],z) for i,rel in enumerate(f)]
+        return stage,phase,targets
+    def run(self):
+        rate=rospy.Rate(20)
+        while not rospy.is_shutdown():
+            if self.enabled and self.start_time is None and self.all_ready():self.start_time=rospy.Time.now();rospy.loginfo("Synchronized round-trip mission started")
+            if self.start_time is not None and not self.paused:self.elapsed=(rospy.Time.now()-self.start_time).to_sec()
+            stage,phase,targets=self.targets(self.elapsed);complete=self.emergency_land or(self.start_time is not None and self.elapsed>=float(self.cfg["stages"]["descent_end"]));self.complete_pub.publish(complete)
+            state="EMERGENCY_LAND" if self.emergency_land else("COMPLETE" if complete else("PAUSED" if self.paused else("RUNNING" if self.start_time else("READY" if self.all_ready() else "INITIALIZING"))))
+            progress=min(1.0,self.elapsed/float(self.cfg["stages"]["descent_end"]))
+            self.state_pub.publish(json.dumps({"state":state,"stage":stage,"phase":phase,"elapsed":round(self.elapsed,2),"progress":round(progress,3),"ready":self.ready}))
+            if stage!=self.last_stage:rospy.loginfo("Mission stage %d (%s) at %.1f s",stage,phase,self.elapsed);self.last_stage=stage
+            for pub,(x,y,z) in zip(self.pubs,targets):
+                msg=PoseStamped();msg.header.stamp,msg.header.frame_id=rospy.Time.now(),"map";msg.pose.position.x,msg.pose.position.y,msg.pose.position.z=x,y,z;msg.pose.orientation.w=1.0;pub.publish(msg)
+            rate.sleep()
+if __name__=="__main__":rospy.init_node("fleet_mission_player");MissionPlayer().run()

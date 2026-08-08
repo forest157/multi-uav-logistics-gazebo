@@ -1,0 +1,8 @@
+<launch>
+  <env name="LANG" value="C.UTF-8"/>
+  <env name="LC_ALL" value="C.UTF-8"/>
+  <node pkg="rqt_gui" type="rqt_gui" name="logistics_operator" output="screen"
+        args="--standalone logistics_gazebo_sim/Operator"/>
+  <node pkg="rviz" type="rviz" name="logistics_rviz" output="screen"
+        args="-d $(find logistics_gazebo_sim)/config/operator.rviz"/>
+</launch>
