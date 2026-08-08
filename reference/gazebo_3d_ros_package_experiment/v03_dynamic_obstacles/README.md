@@ -12,7 +12,7 @@
 
 ## 数据接口
 
-- `/dynamic_obstacles/state`：JSON，10 Hz，包含时间戳、坐标系和障碍物状态；
+- `/dynamic_obstacles/state`：JSON，40 Hz，包含时间戳、坐标系和障碍物状态；
 - `/dynamic_obstacles/markers`：RViz MarkerArray；
 - `/fleet/dynamic_risk`：三机风险摘要，5 Hz；
 - `/fleet/dynamic_diagnostics`：标准 ROS diagnostics。
@@ -41,10 +41,10 @@ v0.2.2 的静态环境行为。
 
 - 新增纯算法测试 6 项，工程全部 28 项单元测试通过；
 - catkin build 成功，无警告；
-- 动态状态实测约 10 Hz；
+- 动态状态实测约 40 Hz；
 - 在线风险摘要实测约 5 Hz；
 - Gazebo `get_model_state` 可查询动态模型，模型位置随时间变化；
-- 动态模型包含圆柱碰撞体，停止节点后自动删除；
+- 动态鸟形模型使用保守球形碰撞体，停止节点后自动删除；
 - 上位机可显示最近无人机、预测最小净空与冲突倒计时；
 - 默认 `dynamic_obstacles:=false`，原三机任务启动参数不变。
 
@@ -54,4 +54,4 @@ v0.2.2 的静态环境行为。
 2. 评估 ROS MoveIt/OMPL 重规划与速度障碍法的组合；
 3. 先用减速/悬停作为安全回退，再启用局部绕行；
 4. 编队原则保持，窄通道时允许受控三维重构；
-5. 增加动态横穿、迎面、遮挡后出现及多障碍压力场景。
+5. 增加鸟类横穿、迎面、遮挡后出现及多障碍压力场景。

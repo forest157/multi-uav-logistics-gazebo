@@ -1,19 +1,23 @@
 frame_id: map
-rate_hz: 10.0
+rate_hz: 40.0
 obstacles:
-  - id: dynamic_crossing_air_0
-    start: [-10.0, -12.0, 5.0]
-    end: [-10.0, 12.0, 5.0]
-    speed_mps: 1.5
-    radius_m: 0.8
-    height_m: 2.0
+  - id: bird_crossing_0
+    start: [-48.0, -8.0, 9.0]
+    end: [48.0, 12.0, 9.0]
+    speed_mps: 4.0
+    radius_m: 0.75
+    height_m: 0.8
     phase_s: 0.0
-    colour: "1.0 0.35 0.05 1"
-  - id: dynamic_crossing_ground_0
-    start: [8.0, -10.0, 0.9]
-    end: [8.0, 10.0, 0.9]
-    speed_mps: 1.0
-    radius_m: 0.7
-    height_m: 1.8
-    phase_s: 4.0
-    colour: "1.0 0.75 0.05 1"
+    bob_amplitude_m: 0.25
+    bob_period_s: 2.4
+    colour: "0.12 0.16 0.20 1"
+  - id: bird_crossing_1
+    start: [42.0, -48.0, 12.0]
+    end: [-30.0, 48.0, 12.0]
+    speed_mps: 3.5
+    radius_m: 0.75
+    height_m: 0.8
+    phase_s: 7.0
+    bob_amplitude_m: 0.18
+    bob_period_s: 2.8
+    colour: "0.24 0.27 0.30 1"

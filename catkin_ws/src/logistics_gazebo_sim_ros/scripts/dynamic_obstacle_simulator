@@ -13,15 +13,15 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 
 def model_xml(name, radius, height, colour):
+    """A bird silhouette with a conservative spherical collision body."""
     return """<?xml version="1.0"?><sdf version="1.6"><model name="{name}">
-<static>true</static><link name="body"><collision name="collision"><geometry>
-<cylinder><radius>{radius}</radius><length>{height}</length></cylinder></geometry>
-<surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
-<contact><ode><kp>100000</kp><kd>100</kd></ode></contact></surface></collision>
-<visual name="visual"><geometry><cylinder><radius>{radius}</radius><length>{height}</length>
-</cylinder></geometry><material><ambient>{colour}</ambient><diffuse>{colour}</diffuse>
-</material></visual></link></model></sdf>""".format(
-        name=name, radius=radius, height=height, colour=colour)
+<static>true</static><link name="bird"><collision name="collision"><geometry>
+<sphere><radius>{radius}</radius></sphere></geometry></collision>
+<visual name="body"><geometry><box><size>1.35 0.42 0.38</size></box></geometry><material><ambient>{colour}</ambient><diffuse>{colour}</diffuse></material></visual>
+<visual name="left_wing"><pose>0 0.72 0.08 0.18 0 -0.18</pose><geometry><box><size>0.9 1.35 0.10</size></box></geometry><material><ambient>{colour}</ambient><diffuse>{colour}</diffuse></material></visual>
+<visual name="right_wing"><pose>0 -0.72 0.08 -0.18 0 0.18</pose><geometry><box><size>0.9 1.35 0.10</size></box></geometry><material><ambient>{colour}</ambient><diffuse>{colour}</diffuse></material></visual>
+<visual name="beak"><pose>0.82 0 0 0 0 0</pose><geometry><box><size>0.32 0.18 0.16</size></box></geometry><material><ambient>0.95 0.55 0.08 1</ambient><diffuse>0.95 0.55 0.08 1</diffuse></material></visual>
+</link></model></sdf>""".format(name=name, radius=radius, height=height, colour=colour)
 
 
 class DynamicObstacleSimulator:
@@ -42,6 +42,8 @@ class DynamicObstacleSimulator:
                 "height": float(raw["height_m"]),
                 "phase": float(raw.get("phase_s", 0.0)),
                 "colour": str(raw.get("colour", "1.0 0.65 0.05 1")),
+                "bob_amplitude": float(raw.get("bob_amplitude_m", 0.2)),
+                "bob_period": float(raw.get("bob_period_s", 2.5)),
             }
             if len(item["start"]) != 3 or len(item["end"]) != 3:
                 raise ValueError("dynamic obstacle start/end must contain xyz")
@@ -70,6 +72,9 @@ class DynamicObstacleSimulator:
         position = [a+(b-a)*ratio for a,b in zip(item["start"],item["end"])]
         velocity = [direction*(b-a)/item["distance"]*item["speed"]
                     for a,b in zip(item["start"],item["end"])]
+        bob_angle = 2.0*math.pi*(elapsed+item["phase"])/max(0.5,item["bob_period"])
+        position[2] += item["bob_amplitude"]*math.sin(bob_angle)
+        velocity[2] += item["bob_amplitude"]*2.0*math.pi/max(0.5,item["bob_period"])*math.cos(bob_angle)
         return position, velocity
 
     def spawn_all(self):
@@ -83,10 +88,11 @@ class DynamicObstacleSimulator:
 
     def marker(self, index, item, position, velocity):
         marker = Marker();marker.header.frame_id=self.frame_id;marker.header.stamp=rospy.Time.now()
-        marker.ns="dynamic_obstacles";marker.id=index;marker.type=Marker.CYLINDER;marker.action=Marker.ADD
+        marker.ns="dynamic_obstacles";marker.id=index;marker.type=Marker.SPHERE;marker.action=Marker.ADD
         marker.pose.position.x,marker.pose.position.y,marker.pose.position.z=position
-        marker.pose.orientation.w=1.0;marker.scale.x=marker.scale.y=2.0*item["radius"]
-        marker.scale.z=item["height"];marker.color.r=1.0;marker.color.g=.55;marker.color.b=.05;marker.color.a=.85
+        yaw=math.atan2(velocity[1],velocity[0]);marker.pose.orientation.z=math.sin(yaw*.5);marker.pose.orientation.w=math.cos(yaw*.5)
+        marker.scale.x=1.35;marker.scale.y=2.7;marker.scale.z=.38
+        marker.color.r=.16;marker.color.g=.20;marker.color.b=.24;marker.color.a=.9
         marker.text="{} v={:.1f}m/s".format(item["id"],math.sqrt(sum(v*v for v in velocity)))
         return marker
 
@@ -98,7 +104,9 @@ class DynamicObstacleSimulator:
                 position,velocity=self.sample(item,elapsed)
                 state=ModelState();state.model_name=item["id"];state.reference_frame="world"
                 state.pose.position.x,state.pose.position.y,state.pose.position.z=position
-                state.pose.orientation.w=1.0
+                yaw=math.atan2(velocity[1],velocity[0])
+                state.pose.orientation.z=math.sin(yaw*.5)
+                state.pose.orientation.w=math.cos(yaw*.5)
                 result=self.move(state)
                 if not result.success:rospy.logwarn_throttle(2.0,"move %s: %s",item["id"],result.status_message)
                 states.append({"id":item["id"],"position":[round(v,4) for v in position],
