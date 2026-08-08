@@ -170,7 +170,7 @@ def main():
     parser.add_argument("--goal-y",type=float);parser.add_argument("--altitude",type=float)
     parser.add_argument("--formation",choices=FORMATION_NAMES,default="triangle")
     parser.add_argument("--vehicle-count",type=int,default=3);parser.add_argument("--spacing",type=float,default=3.0)
-    parser.add_argument("--output");args=parser.parse_args()
+    parser.add_argument("--output");parser.add_argument("--report-json");args=parser.parse_args()
     ids=[args.scene] if args.scene is not None else sorted(SCENES)
     root=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
@@ -180,6 +180,13 @@ def main():
                              formation=args.formation,altitude=args.altitude,vehicle_count=args.vehicle_count,spacing=args.spacing)
             output=args.output or os.path.join(root,"config","mission_scene%d.yaml"%scene_id)
             with open(output,"w") as stream:yaml.safe_dump(cfg,stream,sort_keys=False)
+            if args.report_json:
+                summary={"scene_id":scene_id,"mission_path":output,
+                         "clearance_analysis":cfg["clearance_analysis"],
+                         "trajectory_parameterization":cfg["trajectory_parameterization"],
+                         "stages":cfg["stages"]}
+                with open(args.report_json,"w",encoding="utf-8") as stream:
+                    json.dump(summary,stream,ensure_ascii=False,indent=2)
             print("OK OMPL3D scene=%d states=%d duration=%.2f"%(
                 scene_id,len(path),cfg["stages"]["outbound_end"]-18.0))
     except Exception as exc:
