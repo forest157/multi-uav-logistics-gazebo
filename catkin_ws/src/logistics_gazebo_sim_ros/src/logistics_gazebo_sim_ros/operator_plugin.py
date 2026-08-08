@@ -307,7 +307,10 @@ class OperatorPlugin(Plugin):
             else:text="{} | 最近 {} | 净空 {}m | 冲突倒计时 {}s".format(level,value.get("nearest_vehicle","-"),value.get("minimum_clearance_m","-"),value.get("time_to_conflict_s","无"))
             avoidance=value.get("avoidance") or {}
             if avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
-            elif level=="CRITICAL":text+=" | 无安全候选，保持悬停"
+            elif level in ("WARNING","CRITICAL"):
+                summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}
+                reasons="、".join("{}×{}".format(names.get(key,key),count) for key,count in sorted(summary.items()))
+                text+=" | 无安全候选，保持悬停"+("（{}）".format(reasons) if reasons else "")
             self.dynamic_risk.setText(text)
             self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
         except (TypeError,ValueError):self.dynamic_risk.setText("动态风险数据格式错误")

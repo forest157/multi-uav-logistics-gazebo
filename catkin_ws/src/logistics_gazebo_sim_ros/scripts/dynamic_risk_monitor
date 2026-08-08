@@ -14,6 +14,7 @@ from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path, plan_c
 class DynamicRiskMonitor:
     def __init__(self):
         self.count = int(rospy.get_param("~vehicle_count", 3))
+        self.scene_id = int(rospy.get_param("~scene_id", 0))
         self.horizon = float(rospy.get_param("~horizon_s", 8.0))
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
@@ -82,7 +83,7 @@ class DynamicRiskMonitor:
             reports.append(value)
         level = max((value["level"] for value in reports),
                     key=lambda value: order[value])
-        avoidance=(plan_collective_avoidance(paths,self.obstacles,horizon=self.horizon) if level in ("WARNING","CRITICAL") else {"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None})
+        avoidance=(plan_collective_avoidance(paths,self.obstacles,horizon=self.horizon,scene_id=self.scene_id) if level in ("WARNING","CRITICAL") else {"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None})
         nearest = min(reports, key=lambda value:
                       float("inf") if value["minimum_clearance_m"] is None
                       else value["minimum_clearance_m"])

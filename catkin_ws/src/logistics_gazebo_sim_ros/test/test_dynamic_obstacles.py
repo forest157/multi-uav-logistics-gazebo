@@ -83,5 +83,25 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertFalse(result["viable"]);self.assertIsNone(result["selected_offset"])
         self.assertIn("no collective offset",result["reason"])
 
+    def test_static_boundary_rejects_collective_candidate(self):
+        paths=[[[0.0,44.0,0.0,8.0],[10.0,45.0,0.0,8.0]]]
+        result=plan_collective_avoidance(paths,[],candidate_offsets=[[6.0,0.0,0.0]],scene_id=0)
+        self.assertFalse(result["viable"]);self.assertEqual(result["rejection_summary"].get("E_BOUNDARY"),1)
+
+    def test_static_height_rejects_collective_candidate(self):
+        paths=[[[0.0,-40.0,-40.0,4.0],[10.0,-35.0,-40.0,4.0]]]
+        result=plan_collective_avoidance(paths,[],candidate_offsets=[[0.0,0.0,-5.0]],scene_id=0)
+        self.assertFalse(result["viable"]);self.assertEqual(result["rejection_summary"].get("E_VERTICAL_CLEARANCE"),1)
+
+    def test_static_building_rejects_collective_candidate(self):
+        paths=[[[0.0,10.0,-15.0,8.0],[10.0,20.0,-15.0,8.0]]]
+        result=plan_collective_avoidance(paths,[],candidate_offsets=[[0.0,0.0,0.0]],scene_id=0)
+        self.assertFalse(result["viable"]);self.assertEqual(result["rejection_summary"].get("E_CORRIDOR_TOO_NARROW"),1)
+
+    def test_static_safe_candidate_is_accepted(self):
+        paths=[[[0.0,-40.0,-40.0,8.0],[10.0,-35.0,-40.0,8.0]]]
+        result=plan_collective_avoidance(paths,[],candidate_offsets=[[0.0,0.0,0.0]],scene_id=0)
+        self.assertTrue(result["viable"]);self.assertTrue(result["static_validation"]["feasible"])
+
 if __name__ == "__main__":
     unittest.main()

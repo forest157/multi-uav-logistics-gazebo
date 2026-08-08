@@ -20,7 +20,7 @@
   </include>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim_ros" type="dynamic_risk_monitor"
         name="dynamic_risk_monitor" output="screen">
-    <param name="vehicle_count" value="3"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/>
+    <param name="vehicle_count" value="3"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/>
   </node>
   <include if="$(arg dynamic_obstacles)" file="$(find logistics_gazebo_sim_ros)/launch/dynamic_obstacles.launch">
     <arg name="config" value="$(arg dynamic_obstacle_config)"/>

@@ -198,39 +198,50 @@ def collective_avoidance_candidates(paths, lateral=3.5, vertical=3.0):
     ]
 
 
-def plan_collective_avoidance(paths, obstacles, candidate_offsets=None,
-                              horizon=8.0, required_clearance=0.5,
-                              warning_clearance=2.0):
+def validate_static_paths(scene_id, paths):
+    """Validate actual vehicle xyz paths against scene geometry and limits."""
+    from logistics_gazebo_sim_ros.clearance_analyzer import analyze_path
+    reports=[]
+    for index,path in enumerate(paths):
+        xyz=np.asarray(path,dtype=float)[:,1:]
+        report=analyze_path(int(scene_id),xyz,formation="triangle",vehicle_count=1,spacing=3.0)
+        report["vehicle_id"]="uav{}".format(index);reports.append(report)
+    failed=next((value for value in reports if not value["feasible"]),None)
+    return {"feasible":failed is None,"error_code":None if failed is None else failed["error_code"],
+            "message":"all vehicle paths satisfy static constraints" if failed is None else failed["message"],
+            "vehicle_id":None if failed is None else failed["vehicle_id"],
+            "obstacle":None if failed is None else failed.get("obstacle"),"reports":reports}
+
+
+def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0,
+                              required_clearance=0.5,warning_clearance=2.0,scene_id=None):
     """Select one rigid 3D offset safe for every vehicle, or reject all."""
-    if not paths:
-        raise DynamicObstacleError("at least one vehicle path is required")
-    offsets = (collective_avoidance_candidates(paths)
-               if candidate_offsets is None else candidate_offsets)
-    viable = []
-    evaluated = []
+    if not paths:raise DynamicObstacleError("at least one vehicle path is required")
+    offsets=collective_avoidance_candidates(paths) if candidate_offsets is None else candidate_offsets
+    viable=[];evaluated=[];rejection_summary={}
     for offset in offsets:
-        reports = [assess_timed_path(
-            shifted_path(path, offset), obstacles, horizon=horizon,
-            warning_clearance=warning_clearance) for path in paths]
-        clearances = [report["minimum_clearance_m"] for report in reports
-                      if report["minimum_clearance_m"] is not None]
-        minimum = min(clearances) if clearances else float("inf")
-        value = {
-            "offset": [round(float(v), 3) for v in offset],
-            "minimum_clearance_m": (None if not clearances
-                                    else round(float(minimum), 3)),
-            "levels": [report["level"] for report in reports],
-        }
+        shifted=[shifted_path(path,offset) for path in paths]
+        reports=[assess_timed_path(path,obstacles,horizon=horizon,warning_clearance=warning_clearance) for path in shifted]
+        clearances=[report["minimum_clearance_m"] for report in reports if report["minimum_clearance_m"] is not None]
+        minimum=min(clearances) if clearances else float("inf")
+        static=validate_static_paths(scene_id,shifted) if scene_id is not None else {"feasible":True,"error_code":None,"message":"static validation disabled"}
+        if any(report["level"]=="CRITICAL" for report in reports):rejection="DYNAMIC_CONFLICT"
+        elif clearances and minimum<float(required_clearance):rejection="DYNAMIC_CLEARANCE"
+        elif not static["feasible"]:rejection=static["error_code"] or "STATIC_CONSTRAINT"
+        else:rejection=None
+        value={"offset":[round(float(v),3) for v in offset],
+               "minimum_clearance_m":None if not clearances else round(float(minimum),3),
+               "levels":[report["level"] for report in reports],
+               "static_validation":static,"rejection_reason":rejection}
         evaluated.append(value)
-        if all(report["level"] != "CRITICAL" for report in reports) and (
-                not clearances or minimum >= float(required_clearance)):
-            norm = float(np.linalg.norm(np.asarray(offset, dtype=float)))
-            viable.append((minimum, -norm, value))
-    if not viable:
-        return {"viable": False, "selected_offset": None,
-                "minimum_clearance_m": None, "candidates": evaluated,
-                "reason": "no collective offset satisfies fleet clearance"}
-    selected = max(viable, key=lambda item: (item[0], item[1]))[2]
-    return {"viable": True, "selected_offset": selected["offset"],
-            "minimum_clearance_m": selected["minimum_clearance_m"],
-            "candidates": evaluated, "reason": "safe collective offset found"}
+        if rejection is None:
+            norm=float(np.linalg.norm(np.asarray(offset,dtype=float)));viable.append((minimum,-norm,value))
+        else:rejection_summary[rejection]=rejection_summary.get(rejection,0)+1
+    if not viable:return {"viable":False,"selected_offset":None,"minimum_clearance_m":None,
+        "candidates":evaluated,"reason":"no collective offset satisfies dynamic and static clearance",
+        "rejection_summary":rejection_summary}
+    selected=max(viable,key=lambda item:(item[0],item[1]))[2]
+    return {"viable":True,"selected_offset":selected["offset"],
+            "minimum_clearance_m":selected["minimum_clearance_m"],"candidates":evaluated,
+            "reason":"safe collective offset found","static_validation":selected["static_validation"],
+            "rejection_summary":rejection_summary}
