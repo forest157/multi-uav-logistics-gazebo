@@ -51,7 +51,10 @@ class MissionPlayer:
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self._pose_cb,callback_args=i,queue_size=1)
         self.dynamic_safety_enabled=bool(rospy.get_param("~dynamic_safety_enabled",False))
         self.dynamic_avoidance_enabled=bool(rospy.get_param("~dynamic_avoidance_execution",False))
-        self.avoidance_execution=AvoidanceExecution();self.avoidance_command=self.avoidance_execution.command(rospy.get_time())
+        self.avoidance_execution=AvoidanceExecution(
+            confirmation_s=float(rospy.get_param("~avoidance_confirmation_s",0.6)),
+            apply_s=float(rospy.get_param("~avoidance_apply_s",4.0)),
+            recover_s=float(rospy.get_param("~avoidance_recover_s",4.0)));self.avoidance_command=self.avoidance_execution.command(rospy.get_time())
         self.dynamic_response=DynamicSafetyResponse(rospy.get_param("~dynamic_warning_scale",0.35),rospy.get_param("~dynamic_release_delay_s",2.0))
         self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE"
         self.dynamic_hold_targets=None

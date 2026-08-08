@@ -7,7 +7,7 @@ obstacles:
     speed_mps: 3.0
     radius_m: 0.75
     height_m: 0.8
-    phase_s: 0.0
+    phase_s: 19.0
     bob_amplitude_m: 0.2
     bob_period_s: 2.6
     colour: "0.14 0.18 0.22 1"
