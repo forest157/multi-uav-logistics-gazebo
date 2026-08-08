@@ -1,0 +1,19 @@
+frame_id: map
+rate_hz: 10.0
+obstacles:
+  - id: dynamic_crossing_air_0
+    start: [-10.0, -12.0, 5.0]
+    end: [-10.0, 12.0, 5.0]
+    speed_mps: 1.5
+    radius_m: 0.8
+    height_m: 2.0
+    phase_s: 0.0
+    colour: "1.0 0.35 0.05 1"
+  - id: dynamic_crossing_ground_0
+    start: [8.0, -10.0, 0.9]
+    end: [8.0, 10.0, 0.9]
+    speed_mps: 1.0
+    radius_m: 0.7
+    height_m: 1.8
+    phase_s: 4.0
+    colour: "1.0 0.75 0.05 1"

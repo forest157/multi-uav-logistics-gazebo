@@ -11,7 +11,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim_ros.scenes import SCENES, SCALE, metric_xy
 from python_qt_binding.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QPixmap
-from python_qt_binding.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
+from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget)
 from qt_gui.plugin import Plugin
 from std_msgs.msg import String
@@ -54,6 +54,8 @@ class OperatorPlugin(Plugin):
         form.addRow("\u98de\u884c\u9ad8\u5ea6",self.altitude)
         self.formation=QComboBox();self.formation.addItem("\u6b63\u4e09\u89d2\u961f\u5f62","triangle");self.formation.addItem("\u5012\u4e09\u89d2\u961f\u5f62","inverted");self.formation.addItem("\u6a2a\u961f","row");form.addRow("\u98de\u884c\u961f\u5f62",self.formation)
         self.formation.addItem("纵向一字队形（窄通道）","column");self.formation.addItem("垂直错层队形","vertical");self.formation.addItem("三维楔形队形","wedge3d");self.formation.addItem("三维螺旋队形","helix")
+        self.dynamic_enabled=QCheckBox("启用交叉移动障碍物与在线风险预测");self.dynamic_enabled.setChecked(True)
+        form.addRow("动态避障实验",self.dynamic_enabled)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
@@ -65,10 +67,10 @@ class OperatorPlugin(Plugin):
         self.start.setObjectName("primary");self.land.setObjectName("danger");self.pause.setObjectName("secondary");self.resume.setObjectName("secondary");self.reset.setObjectName("secondary")
         for button in (self.start,self.pause,self.resume,self.reset,self.land):row.addWidget(button)
         root.addWidget(mission)
-        status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e")
+        status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e");self.dynamic_risk=QLabel("等待动态障碍数据")
         self.state.setObjectName("statusBadge");self.stage.setObjectName("statusBadge")
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
-        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("安全状态",self.safety);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
+        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget)
         self.analysis_timer=QTimer(self.widget);self.analysis_timer.setSingleShot(True);self.analysis_timer.setInterval(700);self.analysis_timer.timeout.connect(self.start_analysis)
         self.analysis_timeout=QTimer(self.widget);self.analysis_timeout.setSingleShot(True);self.analysis_timeout.setInterval(20000);self.analysis_timeout.timeout.connect(self.analysis_timed_out)
@@ -82,6 +84,7 @@ class OperatorPlugin(Plugin):
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
         self.formation.currentIndexChanged.connect(self.parameters_changed)
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1)
+        rospy.Subscriber("/fleet/dynamic_risk",String,self.dynamic_risk_cb,queue_size=1)
         self.update_defaults()
     def update_defaults(self):
         sx,sy,gx,gy,alt=SCENE_DEFAULTS[self.scene.currentData()]
@@ -275,7 +278,7 @@ class OperatorPlugin(Plugin):
         if preflight:
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
-        self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
+        self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.process.start("setsid",["roslaunch"]+args);self.state.setText("\u89c4\u5212\u6210\u529f\uff0c\u4eff\u771f\u542f\u52a8\u4e2d")
     def stop_simulation(self):
         if self.process.state()==QProcess.NotRunning:return
@@ -297,6 +300,14 @@ class OperatorPlugin(Plugin):
     def diag_cb(self,msg):
         if not msg.status:return
         s=msg.status[0];v={x.key:x.value for x in s.values};self.safety.setText("{} | \u95f4\u8ddd {}m | \u51c0\u7a7a {}m | \u8bef\u5dee {}m".format(s.message,v.get("min_separation_m","-"),v.get("min_obstacle_clearance_m","-"),v.get("max_tracking_error_m","-")));self.safety.setStyleSheet("color:{}".format("#c62828" if s.level>=2 else "#ef6c00" if s.level==1 else "#2e7d32"))
+    def dynamic_risk_cb(self,msg):
+        try:
+            value=json.loads(msg.data);level=value.get("level","STALE")
+            if level=="STALE":text=value.get("message","等待动态障碍数据")
+            else:text="{} | 最近 {} | 净空 {}m | 冲突倒计时 {}s".format(level,value.get("nearest_vehicle","-"),value.get("minimum_clearance_m","-"),value.get("time_to_conflict_s","无"))
+            self.dynamic_risk.setText(text)
+            self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
+        except (TypeError,ValueError):self.dynamic_risk.setText("动态风险数据格式错误")
     def shutdown_plugin(self):
         self.analysis_timer.stop();self.analysis_timeout.stop()
         if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)

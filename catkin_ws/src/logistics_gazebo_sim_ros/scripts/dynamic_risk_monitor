@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Predict short-horizon fleet clearance from live dynamic-obstacle states."""
+import json
+import math
+
+import rospy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import Header, String
+
+from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path
+
+
+class DynamicRiskMonitor:
+    def __init__(self):
+        self.count = int(rospy.get_param("~vehicle_count", 3))
+        self.horizon = float(rospy.get_param("~horizon_s", 8.0))
+        self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
+        self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
+        sx = float(rospy.get_param("~spawn_x", -40.0))
+        sy = float(rospy.get_param("~spawn_y", -40.0))
+        spacing = float(rospy.get_param("~spawn_spacing_m", 3.0))
+        middle = (self.count - 1) * 0.5
+        self.origins = [(sx + (index-middle)*spacing, sy)
+                        for index in range(self.count)]
+        self.poses = [None] * self.count
+        self.targets = [None] * self.count
+        self.obstacles = []
+        self.last_obstacle_stamp = None
+        for index in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),
+                             PoseStamped, self.pose_cb, callback_args=index, queue_size=1)
+            rospy.Subscriber("/uav{}/target_pose".format(index), PoseStamped,
+                             self.target_cb, callback_args=index, queue_size=1)
+        rospy.Subscriber("/dynamic_obstacles/state", String,
+                         self.obstacles_cb, queue_size=1)
+        self.risk_pub = rospy.Publisher("/fleet/dynamic_risk", String,
+                                        queue_size=5, latch=True)
+        self.diag_pub = rospy.Publisher("/fleet/dynamic_diagnostics",
+                                        DiagnosticArray, queue_size=5)
+
+    def pose_cb(self, message, index):
+        self.poses[index] = message.pose.position
+
+    def target_cb(self, message, index):
+        self.targets[index] = message.pose.position
+
+    def obstacles_cb(self, message):
+        try:
+            payload = json.loads(message.data)
+            self.obstacles = payload.get("obstacles", [])
+            self.last_obstacle_stamp = rospy.Time.now()
+        except (TypeError, ValueError) as error:
+            rospy.logerr_throttle(2.0, "invalid dynamic obstacle state: %s", error)
+
+    def path_for(self, index):
+        pose, target = self.poses[index], self.targets[index]
+        ox, oy = self.origins[index]
+        start = (pose.x+ox, pose.y+oy, pose.z)
+        end = (target.x+ox, target.y+oy, target.z)
+        distance = math.dist(start, end)
+        duration = min(self.horizon, max(0.2, distance/max(0.1, self.speed)))
+        return [[0.0] + list(start), [duration] + list(end)]
+
+    def report(self):
+        if self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp>rospy.Duration(1.0):
+            self.obstacles=[]
+        if not self.obstacles:
+            return {"level": "STALE", "message": "等待动态障碍数据",
+                    "vehicle_reports": [], "obstacle_count": 0}
+        if any(value is None for value in self.poses+self.targets):
+            return {"level": "STALE", "message": "等待无人机位姿与目标",
+                    "vehicle_reports": [], "obstacle_count": len(self.obstacles)}
+        reports = []
+        order = {"SAFE": 0, "WARNING": 1, "CRITICAL": 2}
+        for index in range(self.count):
+            value = assess_timed_path(
+                self.path_for(index), self.obstacles, horizon=self.horizon,
+                warning_clearance=self.warning)
+            value["vehicle_id"] = "uav{}".format(index)
+            reports.append(value)
+        level = max((value["level"] for value in reports),
+                    key=lambda value: order[value])
+        nearest = min(reports, key=lambda value:
+                      float("inf") if value["minimum_clearance_m"] is None
+                      else value["minimum_clearance_m"])
+        return {"level": level, "message": "动态障碍风险{}".format(level),
+                "vehicle_reports": reports, "obstacle_count": len(self.obstacles),
+                "nearest_vehicle": nearest["vehicle_id"],
+                "minimum_clearance_m": nearest["minimum_clearance_m"],
+                "time_to_conflict_s": nearest["time_to_conflict_s"]}
+
+    def publish(self, report):
+        self.risk_pub.publish(json.dumps(report, ensure_ascii=False,
+                                         separators=(",", ":")))
+        levels = {"SAFE": DiagnosticStatus.OK, "WARNING": DiagnosticStatus.WARN,
+                  "CRITICAL": DiagnosticStatus.ERROR, "STALE": DiagnosticStatus.STALE}
+        status = DiagnosticStatus(
+            level=levels[report["level"]], name="logistics_fleet/dynamic_risk",
+            hardware_id="gazebo_sitl", message=report["message"])
+        status.values = [
+            KeyValue("obstacle_count", str(report["obstacle_count"])),
+            KeyValue("minimum_clearance_m",
+                     str(report.get("minimum_clearance_m", "unknown"))),
+            KeyValue("time_to_conflict_s",
+                     str(report.get("time_to_conflict_s", "none")))]
+        self.diag_pub.publish(DiagnosticArray(
+            header=Header(stamp=rospy.Time.now()), status=[status]))
+
+    def run(self):
+        rate = rospy.Rate(5.0)
+        while not rospy.is_shutdown():
+            self.publish(self.report())
+            try: rate.sleep()
+            except rospy.ROSInterruptException: break
+
+
+if __name__ == "__main__":
+    rospy.init_node("dynamic_risk_monitor")
+    DynamicRiskMonitor().run()
