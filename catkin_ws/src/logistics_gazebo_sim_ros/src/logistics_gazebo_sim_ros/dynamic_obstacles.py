@@ -1,5 +1,6 @@
 """Prediction and time-indexed clearance checks for dynamic obstacles."""
 import math
+import bisect
 
 import numpy as np
 
@@ -67,7 +68,10 @@ def interpolate_timed_path(path, query_time):
         return values[0, 1:].copy()
     if t >= values[-1, 0]:
         return values[-1, 1:].copy()
-    upper = int(np.searchsorted(values[:, 0], t))
+    # Use Python's deterministic binary search for this short timestamp list.
+    # A live delivery trial exposed a scalar-dispatch failure in NumPy's
+    # searchsorted while this function was called from concurrent ROS loops.
+    upper = bisect.bisect_right(values[:, 0].tolist(), t)
     a, b = values[upper - 1], values[upper]
     ratio = (t - a[0]) / (b[0] - a[0])
     return a[1:] + ratio * (b[1:] - a[1:])

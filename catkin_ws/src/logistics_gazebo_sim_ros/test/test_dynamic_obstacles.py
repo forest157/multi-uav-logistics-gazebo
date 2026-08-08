@@ -21,6 +21,13 @@ class DynamicObstacleTest(unittest.TestCase):
         path = [[0.0, 0.0, 5.0, 5.0], [10.0, 10.0, 0.0, 5.0]]
         np.testing.assert_allclose(interpolate_timed_path(path, 2.5), [2.5, 3.75, 5.0])
 
+    def test_timed_path_interpolation_accepts_numpy_scalar_query(self):
+        path = [[0.0, 1.0, 2.0, 3.0], [4.0, 5.0, 6.0, 7.0],
+                [8.0, 9.0, 10.0, 11.0]]
+        np.testing.assert_allclose(
+            interpolate_timed_path(path, np.float64(6.0)), [7.0, 8.0, 9.0])
+
+
     def test_crossing_trajectory_is_critical(self):
         path = [[0.0, 0.0, 0.0, 5.0], [10.0, 10.0, 0.0, 5.0]]
         report = assess_timed_path(path, [self.obstacle()], horizon=10.0)

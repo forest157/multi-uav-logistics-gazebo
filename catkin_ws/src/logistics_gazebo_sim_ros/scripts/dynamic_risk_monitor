@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim_ros.dynamic_obstacles import assess_fleet_separation, assess_timed_path, plan_collective_avoidance, prediction_path
+from logistics_gazebo_sim_ros.dynamic_obstacles import assess_fleet_separation, assess_timed_path, prediction_path
 
 
 class DynamicRiskMonitor:
@@ -31,6 +31,12 @@ class DynamicRiskMonitor:
         self.last_obstacle_stamp = None
         self.predicted_paths = None
         self.last_prediction_stamp = None
+        self.cached_avoidance = None
+        self.request_sequence = 0
+        self.pending_request = None
+        self.last_request_stamp = None
+        self.request_period = rospy.Duration(1.0)
+        self.request_timeout = rospy.Duration(2.0)
         for index in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),
                              PoseStamped, self.pose_cb, callback_args=index, queue_size=1)
@@ -42,6 +48,8 @@ class DynamicRiskMonitor:
                          self.prediction_cb, queue_size=1)
         self.risk_pub = rospy.Publisher("/fleet/dynamic_risk", String,
                                         queue_size=5, latch=True)
+        rospy.Subscriber("/fleet/avoidance_plan",String,self.plan_cb,queue_size=1)
+        self.request_pub=rospy.Publisher("/fleet/avoidance_request",String,queue_size=1)
         self.diag_pub = rospy.Publisher("/fleet/dynamic_diagnostics",
                                         DiagnosticArray, queue_size=5)
 
@@ -100,6 +108,42 @@ class DynamicRiskMonitor:
         end = (target.x+ox, target.y+oy, target.z)
         return prediction_path(start, end, self.horizon)
 
+    def plan_cb(self, message):
+        try:
+            payload=json.loads(message.data)
+            if payload.get("request_id")!=self.pending_request:
+                return
+            self.cached_avoidance=payload.get("avoidance")
+            self.pending_request=None
+        except (TypeError,ValueError) as error:
+            rospy.logerr_throttle(2.0,"invalid avoidance plan: %s",error)
+
+    def request_plan(self, paths):
+        now=rospy.Time.now()
+        if (self.pending_request is not None and
+                self.last_request_stamp is not None and
+                now-self.last_request_stamp>=self.request_timeout):
+            rospy.logwarn_throttle(2.0,"avoidance request timed out; retrying")
+            self.pending_request=None;self.cached_avoidance=None
+        due=(self.pending_request is None and
+             (self.last_request_stamp is None or
+              now-self.last_request_stamp>=self.request_period))
+        if due:
+            self.request_sequence+=1
+            self.pending_request=self.request_sequence
+            request={"request_id":self.pending_request,"paths":paths,
+                     "obstacles":self.obstacles,
+                     "options":{"horizon":self.horizon,
+                         "scene_id":self.scene_id,
+                         "minimum_separation":self.minimum_separation}}
+            self.request_pub.publish(json.dumps(request,separators=(",",":")))
+            self.last_request_stamp=now
+        return self.cached_avoidance or {
+            "viable":False,"selected_offset":None,
+            "reason":"avoidance planner pending","candidates":[],
+            "minimum_clearance_m":None,
+            "rejection_summary":{"PLANNER_PENDING":1}}
+
     def report(self):
         if self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp>rospy.Duration(1.0):
             self.obstacles=[]
@@ -123,7 +167,13 @@ class DynamicRiskMonitor:
         separation=assess_fleet_separation(
             paths,horizon=self.horizon,minimum_separation=self.minimum_separation)
         if not separation["safe"]:level="CRITICAL"
-        avoidance=(plan_collective_avoidance(paths,self.obstacles,horizon=self.horizon,scene_id=self.scene_id,minimum_separation=self.minimum_separation) if level in ("WARNING","CRITICAL") else {"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None})
+        if level in ("WARNING","CRITICAL"):
+            avoidance=self.request_plan(paths)
+        else:
+            self.cached_avoidance=None;self.pending_request=None
+            self.last_request_stamp=None
+            avoidance={"viable":False,"selected_offset":None,
+                "reason":"avoidance not required","candidates":[],"minimum_clearance_m":None}
         nearest = min(reports, key=lambda value:
                       float("inf") if value["minimum_clearance_m"] is None
                       else value["minimum_clearance_m"])
@@ -158,7 +208,21 @@ class DynamicRiskMonitor:
     def run(self):
         rate = rospy.Rate(5.0)
         while not rospy.is_shutdown():
-            self.publish(self.report())
+            try:
+                report=self.report()
+            except Exception as error:
+                rospy.logerr_throttle(2.0,"risk cycle failed safely: %s",error)
+                report={"level":"CRITICAL",
+                    "message":"动态风险计算异常，机队已安全悬停",
+                    "vehicle_reports":[],"obstacle_count":len(self.obstacles),
+                    "nearest_vehicle":None,"minimum_clearance_m":None,
+                    "time_to_conflict_s":0.0,
+                    "fleet_separation":{"safe":False,
+                        "minimum_separation_m":None,"time_to_conflict_s":0.0},
+                    "avoidance":{"viable":False,"selected_offset":None,
+                        "reason":"risk computation failure","candidates":[],
+                        "minimum_clearance_m":None}}
+            self.publish(report)
             try: rate.sleep()
             except rospy.ROSInterruptException: break
 

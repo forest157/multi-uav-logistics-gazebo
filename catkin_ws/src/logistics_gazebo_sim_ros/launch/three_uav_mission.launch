@@ -27,6 +27,11 @@
     <param name="horizon_s" value="8.0"/><param name="minimum_separation_m" value="3.0"/>
     <param name="warning_clearance_m" value="8.0"/>
   </node>
+  <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim_ros"
+        type="dynamic_avoidance_planner" name="dynamic_avoidance_planner" output="screen" respawn="true">
+    <env name="OPENBLAS_NUM_THREADS" value="1"/>
+    <env name="OMP_NUM_THREADS" value="1"/>
+  </node>
   <include if="$(arg dynamic_obstacles)" file="$(find logistics_gazebo_sim_ros)/launch/dynamic_obstacles.launch">
     <arg name="config" value="$(arg dynamic_obstacle_config)"/>
   </include>
