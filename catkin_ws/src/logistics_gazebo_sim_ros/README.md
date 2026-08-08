@@ -1,45 +1,53 @@
-# logistics_gazebo_sim_ros
+# ROS 标准规划包三维实验版
 
-ROS Noetic + Gazebo Classic 11 + PX4 v1.13.2 oziO�SU+ 7 k	 0.2kߋ{�: 100 m � 100 m ��~o_��[�h�RVizs��6rqtnOM~� CSV��U
+## 隔离方式
 
-## �
-o:
+- 稳定版：`~/catkin_ws/src/logistics_gazebo_sim`
+- 实验版：`~/catkin_ws/src/logistics_gazebo_sim_ros`
+- ROS 包名：`logistics_gazebo_sim_ros`
+- 两个工程可同时编译，但控制台和仿真节点名称相同，运行时只启动一个版本。
+
+## 算法链路
+
+实验版将稳定版自写 NumPy 栅格 A* 和自定义 B 样条替换为：
+
+1. ROS Noetic 提供的 OMPL 1.6。
+2. 三维 RealVectorStateSpace(x, y, z)。
+3. InformedRRTstar 路径长度优化。
+4. OMPL PathSimplifier 的 reduceVertices、shortcutPath 和 smoothBSpline。
+5. TOPPRA 三维速度/加速度时间参数化。
+6. PX4/MAVROS 三机跟踪、投递与返航。
+
+障碍物按编队尺度进行水平 4.5 m、竖直 2.0 m 膨胀。状态边界为 x/y ±46 m、z 3~45 m。规划器允许通过爬升越过低障碍物，输出轨迹字段为 `[t,x,y,z]`。
+
+## 已安装依赖
+
+- ros-noetic-ompl
+- ros-noetic-octomap-server
+- ros-noetic-navigation
+- scipy
+- toppra
+
+OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线对照；当前静态场景首先使用与 Gazebo 障碍物一致的三维膨胀体作为 OMPL validity checker，避免从仿真真值到 OctoMap 的离散误差影响首轮验证。
+
+## 验证结果
+
+七个场景均完成 OMPL 3D + TOPPRA 规划。典型场景 0：
+
+- OMPL 平滑路径：约 166 个插值状态。
+- TOPPRA 轨迹：约 840 个 0.1 s 采样。
+- 高度范围：8.0~16.49 m。
+- 未放宽速度/加速度约束。
+- 任务播放器运行时目标高度验证覆盖同一范围。
+
+场景 1 在 37 m 已高于主要障碍物，因此最优路径保持恒高；其余复杂低空场景会按需要爬升或侧向绕障。
+
+## 启动
 
 ```bash
 source /opt/ros/noetic/setup.bash
 source ~/catkin_ws/devel/setup.bash
-source ~/PX4_Firmware/Tools/setup_gazebo.bash ~/PX4_Firmware ~/PX4_Firmware/build/px4_sitl_default
-export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:~/PX4_Firmware:~/PX4_Firmware/Tools/sitl_gazebo
 roslaunch logistics_gazebo_sim_ros operator_station.launch
 ```
-_( rqtn�	�~o|��\�o~�?�_�� READYt��Y�go�|��g�M}�\n�RViz ���yo:�w����
 
-�ϰ����e `~/.ros/logistics_runs/mission_*.csv�PX4 ULogoM� SITL}�~�U� `log/` ;
-
-##v���
-
-```bash
-roslaunch logistics_gazebo_sim_ros three_uav_mission.launch \
-  scene_id:=0 spawn_x:=-40 spawn_y:=-40 target_z:=5 \
-  mission_config:=$(rospack find logistics_gazebo_sim_ros)/config/mission_scene0.yaml
-```
-_~o�u1Oo:��9}scene 06 ���oM� `config/mission_scene*.yaml`
-
-## 往返任务流程
-
-起点起飞 → 出发编队 → 前往配送点 → 投递悬停 → 返航 → 起点恢复编队 → 起点降落并自动解锁。紧急降落会跳过返航并在当前位置降落。
-
-## 轨迹算法
-
-v0.2 航迹采用“OMPL Informed RRT* 三维规划 → OMPL PathSimplifier/B 样条平滑 → 三维净空分析 → TOPPRA 时间参数化”。规划后会逐采样点检查每架无人机，而不是只检查编队中心。
-
-路径队形调度器按首选队形、纵向一字、垂直错层、横队的顺序寻找可行方案；变换在安全窗口内连续插值，并强制保持最小机间距。返航按相反时间顺序复用已验证的队形计划。
-
-## 自定义规划与任务进度
-
-上位机支持地图点选起终点、飞行高度、队形和任务重置。参数改变后，旧结果立即失效并自动重新运行 OMPL、净空、阶段容量、队形调度和 TOPPRA 分析；未通过时禁止启动并显示错误分类、位置和处理建议。只读进度条实时反映 Gazebo 物理仿真进度；实时物理仿真不支持拖动快进。
-
-## v0.2 验证
-
-- 19 项 Python 单元测试通过。
-- 7 个内置场景均通过 9 项任务阶段和逐机全轨迹检查。
+界面标题包含“ROS OMPL 3D 实验版”，用于和稳定版区分。
