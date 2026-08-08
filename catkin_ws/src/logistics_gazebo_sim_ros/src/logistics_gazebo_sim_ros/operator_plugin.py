@@ -305,6 +305,9 @@ class OperatorPlugin(Plugin):
             value=json.loads(msg.data);level=value.get("level","STALE")
             if level=="STALE":text=value.get("message","等待动态障碍数据")
             else:text="{} | 最近 {} | 净空 {}m | 冲突倒计时 {}s".format(level,value.get("nearest_vehicle","-"),value.get("minimum_clearance_m","-"),value.get("time_to_conflict_s","无"))
+            avoidance=value.get("avoidance") or {}
+            if avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
+            elif level=="CRITICAL":text+=" | 无安全候选，保持悬停"
             self.dynamic_risk.setText(text)
             self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
         except (TypeError,ValueError):self.dynamic_risk.setText("动态风险数据格式错误")

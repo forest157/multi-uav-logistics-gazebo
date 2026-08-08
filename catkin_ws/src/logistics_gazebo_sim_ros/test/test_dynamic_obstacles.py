@@ -5,7 +5,7 @@ import numpy as np
 
 from logistics_gazebo_sim_ros.dynamic_obstacles import (
     DynamicObstacleError, DynamicSafetyResponse, assess_timed_path, interpolate_timed_path,
-    obstacle_clearance, predict_position)
+    obstacle_clearance, plan_collective_avoidance, predict_position, shifted_path)
 
 
 class DynamicObstacleTest(unittest.TestCase):
@@ -62,6 +62,26 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertEqual(value["action"], "NORMAL")
         self.assertEqual(value["speed_scale"], 1.0)
 
+
+    def fleet_paths(self):
+        return [[[0.0,0.0,y,5.0],[10.0,10.0,y,5.0]] for y in (-3.0,0.0,3.0)]
+
+    def test_collective_offset_preserves_formation_distances(self):
+        paths=self.fleet_paths();shifted=[shifted_path(path,[2.0,-1.0,4.0]) for path in paths]
+        before=np.linalg.norm(np.asarray(paths[0])[-1,1:]-np.asarray(paths[1])[-1,1:])
+        after=np.linalg.norm(shifted[0][-1,1:]-shifted[1][-1,1:])
+        self.assertAlmostEqual(before,after)
+
+    def test_collective_planner_selects_safe_vertical_candidate(self):
+        result=plan_collective_avoidance(self.fleet_paths(),[self.obstacle()],candidate_offsets=[[0.0,0.0,0.0],[0.0,0.0,6.0]],horizon=10.0)
+        self.assertTrue(result["viable"]);self.assertEqual(result["selected_offset"],[0.0,0.0,6.0])
+        self.assertGreaterEqual(result["minimum_clearance_m"],0.5)
+
+    def test_collective_planner_rejects_all_unsafe_candidates(self):
+        obstacle=self.obstacle();obstacle["radius"]=30.0;obstacle["height"]=30.0
+        result=plan_collective_avoidance(self.fleet_paths(),[obstacle],candidate_offsets=[[0.0,0.0,0.0],[0.0,0.0,3.0]],horizon=10.0)
+        self.assertFalse(result["viable"]);self.assertIsNone(result["selected_offset"])
+        self.assertIn("no collective offset",result["reason"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path
+from logistics_gazebo_sim_ros.dynamic_obstacles import assess_timed_path, plan_collective_avoidance
 
 
 class DynamicRiskMonitor:
@@ -72,15 +72,17 @@ class DynamicRiskMonitor:
             return {"level": "STALE", "message": "等待无人机位姿与目标",
                     "vehicle_reports": [], "obstacle_count": len(self.obstacles)}
         reports = []
+        paths=[self.path_for(index) for index in range(self.count)]
         order = {"SAFE": 0, "WARNING": 1, "CRITICAL": 2}
         for index in range(self.count):
             value = assess_timed_path(
-                self.path_for(index), self.obstacles, horizon=self.horizon,
+                paths[index], self.obstacles, horizon=self.horizon,
                 warning_clearance=self.warning)
             value["vehicle_id"] = "uav{}".format(index)
             reports.append(value)
         level = max((value["level"] for value in reports),
                     key=lambda value: order[value])
+        avoidance=(plan_collective_avoidance(paths,self.obstacles,horizon=self.horizon) if level in ("WARNING","CRITICAL") else {"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None})
         nearest = min(reports, key=lambda value:
                       float("inf") if value["minimum_clearance_m"] is None
                       else value["minimum_clearance_m"])
@@ -88,7 +90,8 @@ class DynamicRiskMonitor:
                 "vehicle_reports": reports, "obstacle_count": len(self.obstacles),
                 "nearest_vehicle": nearest["vehicle_id"],
                 "minimum_clearance_m": nearest["minimum_clearance_m"],
-                "time_to_conflict_s": nearest["time_to_conflict_s"]}
+                "time_to_conflict_s": nearest["time_to_conflict_s"],
+                "avoidance":avoidance}
 
     def publish(self, report):
         self.risk_pub.publish(json.dumps(report, ensure_ascii=False,

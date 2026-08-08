@@ -151,3 +151,86 @@ class DynamicSafetyResponse:
                     "risk_level": level}
         return {"action": "NORMAL", "speed_scale": 1.0,
                 "risk_level": level}
+
+
+def shifted_path(path, offset):
+    """Blend a collective xyz offset during the first 40 percent of the path."""
+    values = np.asarray(path, dtype=float).copy()
+    if values.ndim != 2 or values.shape[1] != 4 or len(values) < 2:
+        raise DynamicObstacleError("timed path must contain at least two [t,x,y,z] rows")
+    offset = np.asarray(offset, dtype=float)
+    if offset.shape != (3,):
+        raise DynamicObstacleError("avoidance offset must contain xyz")
+    span = values[-1, 0]-values[0, 0]
+    if span <= 0.0:
+        raise DynamicObstacleError("path timestamps must increase")
+    sample_times = np.linspace(values[0,0],values[-1,0],max(11,len(values)))
+    sampled = np.asarray([interpolate_timed_path(values,t) for t in sample_times])
+    values = np.column_stack((sample_times,sampled))
+    ratios = np.minimum(1.0, (values[:, 0]-values[0, 0])/(0.4*span))
+    values[:, 1:] += ratios[:, None]*offset[None, :]
+    return values
+
+
+def collective_avoidance_candidates(paths, lateral=3.5, vertical=3.0):
+    """Generate rigid fleet offsets perpendicular to the mean route."""
+    arrays = [np.asarray(path, dtype=float) for path in paths]
+    if not arrays:
+        raise DynamicObstacleError("at least one vehicle path is required")
+    directions = np.asarray([value[-1, 1:3]-value[0, 1:3]
+                             for value in arrays])
+    direction = np.mean(directions, axis=0)
+    norm = float(np.linalg.norm(direction))
+    if norm < 1e-6:
+        perpendicular = np.asarray([0.0, 1.0])
+    else:
+        perpendicular = np.asarray([-direction[1], direction[0]])/norm
+    lateral_vector = float(lateral)*perpendicular
+    return [
+        [float(lateral_vector[0]), float(lateral_vector[1]), 0.0],
+        [-float(lateral_vector[0]), -float(lateral_vector[1]), 0.0],
+        [0.0, 0.0, float(vertical)],
+        [0.0, 0.0, -float(vertical)],
+        [2.0*float(lateral_vector[0]), 2.0*float(lateral_vector[1]), 0.0],
+        [-2.0*float(lateral_vector[0]), -2.0*float(lateral_vector[1]), 0.0],
+        [0.0, 0.0, 2.0*float(vertical)],
+        [0.0, 0.0, -2.0*float(vertical)],
+    ]
+
+
+def plan_collective_avoidance(paths, obstacles, candidate_offsets=None,
+                              horizon=8.0, required_clearance=0.5,
+                              warning_clearance=2.0):
+    """Select one rigid 3D offset safe for every vehicle, or reject all."""
+    if not paths:
+        raise DynamicObstacleError("at least one vehicle path is required")
+    offsets = (collective_avoidance_candidates(paths)
+               if candidate_offsets is None else candidate_offsets)
+    viable = []
+    evaluated = []
+    for offset in offsets:
+        reports = [assess_timed_path(
+            shifted_path(path, offset), obstacles, horizon=horizon,
+            warning_clearance=warning_clearance) for path in paths]
+        clearances = [report["minimum_clearance_m"] for report in reports
+                      if report["minimum_clearance_m"] is not None]
+        minimum = min(clearances) if clearances else float("inf")
+        value = {
+            "offset": [round(float(v), 3) for v in offset],
+            "minimum_clearance_m": (None if not clearances
+                                    else round(float(minimum), 3)),
+            "levels": [report["level"] for report in reports],
+        }
+        evaluated.append(value)
+        if all(report["level"] != "CRITICAL" for report in reports) and (
+                not clearances or minimum >= float(required_clearance)):
+            norm = float(np.linalg.norm(np.asarray(offset, dtype=float)))
+            viable.append((minimum, -norm, value))
+    if not viable:
+        return {"viable": False, "selected_offset": None,
+                "minimum_clearance_m": None, "candidates": evaluated,
+                "reason": "no collective offset satisfies fleet clearance"}
+    selected = max(viable, key=lambda item: (item[0], item[1]))[2]
+    return {"viable": True, "selected_offset": selected["offset"],
+            "minimum_clearance_m": selected["minimum_clearance_m"],
+            "candidates": evaluated, "reason": "safe collective offset found"}
