@@ -48,6 +48,20 @@ v0.2.2 的静态环境行为。
 - 上位机可显示最近无人机、预测最小净空与冲突倒计时；
 - 默认 `dynamic_obstacles:=false`，原三机任务启动参数不变。
 
+## 第二批：编队级安全响应
+
+- WARNING：任务虚拟时钟降为 35%，三架无人机同步减速，队形相位不被打乱；
+- CRITICAL：锁存三机当时的本地位置作为目标，执行同步悬停；
+- 恢复：风险连续 SAFE 2 秒后才解除悬停，避免边界抖动反复启停；
+- STALE：不会凭空触发新悬停；已经锁存时则维持悬停；
+- 手动重置任务会同时清空风险锁存和虚拟时钟状态；
+- `/fleet/mission_state` 增加 `dynamic_action`、`dynamic_risk` 和
+  `speed_scale` 字段，供 rqt 显示与日志分析。
+
+在线注入验收中，CRITICAL 后三机目标被固定为各自当前落地点附近位置，
+`dynamic_action=HOLD`、`speed_scale=0.0`；持续 SAFE 超过 2 秒后恢复为
+`dynamic_action=NORMAL`、`speed_scale=1.0`。全工程 31 项测试通过。
+
 ## 下一批
 
 1. 将动态风险接入局部三维轨迹候选生成；

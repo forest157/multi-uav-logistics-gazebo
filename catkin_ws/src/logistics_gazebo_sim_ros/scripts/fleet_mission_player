@@ -6,6 +6,7 @@ from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger, TriggerResponse
+from logistics_gazebo_sim_ros.dynamic_obstacles import DynamicSafetyResponse
 
 def smoothstep(v):
     v=max(0.0,min(1.0,v));return v*v*(3.0-2.0*v)
@@ -40,11 +41,17 @@ class MissionPlayer:
         self.pubs=[rospy.Publisher("/uav{}/target_pose".format(i),PoseStamped,queue_size=5) for i in range(self.count)]
         self.state_pub=rospy.Publisher("/fleet/mission_state",String,queue_size=5,latch=True);self.complete_pub=rospy.Publisher("/fleet/mission_complete",Bool,queue_size=1,latch=True);self.takeoff_pub=rospy.Publisher("/fleet/takeoff_authorized",Bool,queue_size=1,latch=True)
         self.ready,self.altitudes=[False]*self.count,[0.0]*self.count
+        self.current_poses=[None]*self.count
         for i in range(self.count):
             rospy.Subscriber("/uav{}/mavros/state".format(i),State,self._state_cb,callback_args=i,queue_size=1)
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self._pose_cb,callback_args=i,queue_size=1)
+        self.dynamic_safety_enabled=bool(rospy.get_param("~dynamic_safety_enabled",False))
+        self.dynamic_response=DynamicSafetyResponse(rospy.get_param("~dynamic_warning_scale",0.35),rospy.get_param("~dynamic_release_delay_s",2.0))
+        self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE"
+        self.dynamic_hold_targets=None
+        rospy.Subscriber("/fleet/dynamic_risk",String,self._dynamic_risk_cb,queue_size=1)
         self.enabled=rospy.get_param("~auto_start",True);self.paused=False;self.start_time=None;self.pause_time=None;self.last_stage=None;self.emergency_land=False
-        self.elapsed=0.0;self.landing_ready_since=None
+        self.elapsed=0.0;self.landing_ready_since=None;self.last_clock=rospy.Time.now()
         arrival=float(self.cfg["stages"]["arrival_reconfigure_end"])
         planned=float(self.cfg["stages"]["descent_end"])-arrival
         self.touchdown_altitude=min(float(self.cfg["landing_altitude"]),0.18)
@@ -52,7 +59,18 @@ class MissionPlayer:
         rospy.Service("~start",Trigger,self._start);rospy.Service("~pause",Trigger,self._pause);rospy.Service("~resume",Trigger,self._resume);rospy.Service("~land",Trigger,self._land);rospy.Service("~reset",Trigger,self._reset)
         self.complete_pub.publish(False);self.takeoff_pub.publish(self.enabled)
     def _state_cb(self,msg,i):self.ready[i]=msg.connected and msg.armed and msg.mode=="OFFBOARD"
-    def _pose_cb(self,msg,i):self.altitudes[i]=msg.pose.position.z
+    def _pose_cb(self,msg,i):
+        self.altitudes[i]=msg.pose.position.z;self.current_poses[i]=(msg.pose.position.x,msg.pose.position.y,msg.pose.position.z)
+    def _dynamic_risk_cb(self,msg):
+        if not self.dynamic_safety_enabled:return
+        try:level=str(json.loads(msg.data).get("level","STALE"))
+        except (TypeError,ValueError):level="STALE"
+        command=self.dynamic_response.update(level,rospy.get_time())
+        self.dynamic_action,self.dynamic_scale,self.dynamic_level=command["action"],command["speed_scale"],command["risk_level"]
+        if self.dynamic_action=="HOLD" and self.dynamic_hold_targets is None and all(p is not None for p in self.current_poses):
+            self.dynamic_hold_targets=list(self.current_poses);rospy.logwarn("Dynamic obstacle critical: synchronized fleet hold")
+        elif self.dynamic_action!="HOLD":
+            self.dynamic_hold_targets=None
     def all_ready(self):return all(self.ready) and min(self.altitudes)>=float(self.cfg["ready_altitude"])
     def _start(self,_):self.enabled,self.paused=True,False;self.takeoff_pub.publish(True);return TriggerResponse(True,"takeoff authorized; synchronized mission start requested")
     def _pause(self,_):
@@ -60,11 +78,12 @@ class MissionPlayer:
         self.paused,self.pause_time=True,rospy.Time.now();return TriggerResponse(True,"mission paused")
     def _resume(self,_):
         if not self.paused:return TriggerResponse(False,"mission is not paused")
-        self.start_time+=rospy.Time.now()-self.pause_time;self.paused=False;return TriggerResponse(True,"mission resumed")
+        self.paused=False;self.last_clock=rospy.Time.now();return TriggerResponse(True,"mission resumed")
     def _land(self,_):
         self.emergency_land=True;self.enabled,self.paused=False,False;self.takeoff_pub.publish(False);self.complete_pub.publish(True);return TriggerResponse(True,"emergency landing requested")
     def _reset(self,_):
         self.enabled=False;self.paused=False;self.start_time=None;self.pause_time=None;self.emergency_land=False;self.elapsed=0.0;self.last_stage=None;self.landing_ready_since=None
+        self.dynamic_response.reset();self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.last_clock=rospy.Time.now()
         self.complete_pub.publish(False);self.takeoff_pub.publish(False)
         return TriggerResponse(True,"mission reset; takeoff authorization revoked")
 
@@ -112,18 +131,20 @@ class MissionPlayer:
     def run(self):
         rate=rospy.Rate(20)
         while not rospy.is_shutdown():
-            if self.enabled and self.start_time is None and self.all_ready():self.start_time=rospy.Time.now();rospy.loginfo("Synchronized round-trip mission started")
-            if self.start_time is not None and not self.paused:self.elapsed=(rospy.Time.now()-self.start_time).to_sec()
+            now=rospy.Time.now();dt=max(0.0,(now-self.last_clock).to_sec());self.last_clock=now
+            if self.enabled and self.start_time is None and self.all_ready():self.start_time=now;rospy.loginfo("Synchronized round-trip mission started")
+            if self.start_time is not None and not self.paused:self.elapsed+=dt*self.dynamic_scale
             stage,phase,targets=self.targets(self.elapsed)
+            if self.dynamic_action=="HOLD" and self.dynamic_hold_targets is not None:targets=self.dynamic_hold_targets
             near_ground=self.start_time is not None and self.elapsed>=self.descent_end and max(self.altitudes)<=0.30
             if near_ground:
                 if self.landing_ready_since is None:self.landing_ready_since=rospy.Time.now()
             else:self.landing_ready_since=None
             settled=self.landing_ready_since is not None and rospy.Time.now()-self.landing_ready_since>=rospy.Duration(0.75)
             complete=self.emergency_land or settled;self.complete_pub.publish(complete)
-            state="EMERGENCY_LAND" if self.emergency_land else("COMPLETE" if complete else("PAUSED" if self.paused else("RUNNING" if self.start_time else("READY" if self.all_ready() else "INITIALIZING"))))
+            state="EMERGENCY_LAND" if self.emergency_land else("COMPLETE" if complete else("PAUSED" if self.paused else("DYNAMIC_HOLD" if self.dynamic_action=="HOLD" and self.start_time else("DYNAMIC_SLOW" if self.dynamic_action=="SLOW" and self.start_time else("RUNNING" if self.start_time else("READY" if self.all_ready() else "INITIALIZING"))))))
             progress=min(1.0,self.elapsed/self.descent_end)
-            self.state_pub.publish(json.dumps({"state":state,"stage":stage,"phase":phase,"elapsed":round(self.elapsed,2),"progress":round(progress,3),"ready":self.ready}))
+            self.state_pub.publish(json.dumps({"state":state,"stage":stage,"phase":phase,"elapsed":round(self.elapsed,2),"progress":round(progress,3),"ready":self.ready,"dynamic_action":self.dynamic_action,"dynamic_risk":self.dynamic_level,"speed_scale":round(self.dynamic_scale,2)}))
             if stage!=self.last_stage:rospy.loginfo("Mission stage %d (%s) at %.1f s",stage,phase,self.elapsed);self.last_stage=stage
             for pub,(x,y,z) in zip(self.pubs,targets):
                 msg=PoseStamped();msg.header.stamp,msg.header.frame_id=rospy.Time.now(),"map";msg.pose.position.x,msg.pose.position.y,msg.pose.position.z=x,y,z;msg.pose.orientation.w=1.0;pub.publish(msg)

@@ -113,3 +113,41 @@ def assess_timed_path(path, obstacles, horizon=8.0, sample_period=0.2,
         "critical_time_s": round(float(critical[1]), 3),
         "critical_position": [round(float(v), 3) for v in critical[2]],
     }
+
+
+class DynamicSafetyResponse:
+    """Convert noisy risk levels into fleet-wide speed/hold commands."""
+    def __init__(self, warning_scale=0.35, release_delay=2.0):
+        self.warning_scale = float(warning_scale)
+        self.release_delay = float(release_delay)
+        self.hold_latched = False
+        self.clear_since = None
+
+    def reset(self):
+        self.hold_latched = False
+        self.clear_since = None
+
+    def update(self, level, now):
+        level = str(level).upper()
+        now = float(now)
+        if level == "CRITICAL":
+            self.hold_latched = True
+            self.clear_since = None
+        elif self.hold_latched:
+            if level == "SAFE":
+                if self.clear_since is None:
+                    self.clear_since = now
+                if now-self.clear_since >= self.release_delay:
+                    self.hold_latched = False
+                    self.clear_since = None
+            else:
+                self.clear_since = None
+
+        if self.hold_latched:
+            return {"action": "HOLD", "speed_scale": 0.0,
+                    "risk_level": level}
+        if level == "WARNING":
+            return {"action": "SLOW", "speed_scale": self.warning_scale,
+                    "risk_level": level}
+        return {"action": "NORMAL", "speed_scale": 1.0,
+                "risk_level": level}
