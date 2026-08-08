@@ -25,13 +25,13 @@
 只启动动态障碍（已有 Gazebo 时）：
 
 ```bash
-roslaunch logistics_gazebo_sim_ros dynamic_obstacles.launch
+roslaunch logistics_gazebo_sim dynamic_obstacles.launch
 ```
 
 三机任务启用动态实验：
 
 ```bash
-roslaunch logistics_gazebo_sim_ros three_uav_mission.launch dynamic_obstacles:=true
+roslaunch logistics_gazebo_sim three_uav_mission.launch dynamic_obstacles:=true
 ```
 
 rqt 上位机默认勾选“启用交叉移动障碍物与在线风险预测”，可以取消勾选以复现

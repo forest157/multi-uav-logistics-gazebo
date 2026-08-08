@@ -37,7 +37,7 @@
 实验 ORCA：
 
 ```bash
-roslaunch logistics_gazebo_sim_ros three_uav_mission.launch \
+roslaunch logistics_gazebo_sim three_uav_mission.launch \
   dynamic_obstacles:=true local_avoidance_algorithm:=orca3d \
   dynamic_avoidance_execution:=false
 ```

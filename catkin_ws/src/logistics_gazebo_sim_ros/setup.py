@@ -1,5 +1,0 @@
-#!/usr/bin/env python3
-from setuptools import setup
-
-setup(name="logistics_gazebo_sim_ros", version='0.4.1',
-      packages=["logistics_gazebo_sim_ros"], package_dir={"": "src"})

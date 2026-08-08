@@ -1,0 +1,11 @@
+<launch>
+  <arg name="config" default="$(find logistics_gazebo_sim)/config/dynamic_obstacles_crossing.yaml"/>
+  <arg name="expected_vehicle_count" default="3"/>
+  <arg name="minimum_spawn_clearance_m" default="5.0"/>
+  <node pkg="logistics_gazebo_sim" type="dynamic_obstacle_simulator"
+        name="dynamic_obstacle_simulator" output="screen">
+    <param name="expected_vehicle_count" value="$(arg expected_vehicle_count)"/>
+    <param name="minimum_spawn_clearance_m" value="$(arg minimum_spawn_clearance_m)"/>
+    <param name="config" value="$(arg config)"/>
+  </node>
+</launch>

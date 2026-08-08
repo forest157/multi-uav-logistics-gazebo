@@ -1,79 +1,48 @@
-# logistics_gazebo_sim
+# 多无人机物流 Gazebo 三维仿真
 
-基于 ROS Noetic、Gazebo Classic 11 和 PX4 v1.13.2 的三机物流配送仿真包。工程提供七种真实比例三维场景、编队飞行、实体包裹投递、自动返航、软降落、RViz 可视化、rqt 上位机和 CSV 任务记录。
+## 工程定位
 
-## 与实验版的区别
+`~/catkin_ws/src/logistics_gazebo_sim` 是当前唯一主包，ROS 包名为 `logistics_gazebo_sim`。原稳定版与实验版已经统一，旧实现保留在 Git 历史标签中，不再通过两个互相依赖的包并行维护。
 
-- 稳定版包：`logistics_gazebo_sim`
-- ROS 算法实验包：`logistics_gazebo_sim_ros`
-- 稳定版保留原项目的自定义规划链路，实验版使用 ROS OMPL 三维规划。
-- 两个包的节点名称相同，运行时只能启动其中一个。
+## 算法链路
 
-## 环境准备
+当前主线算法链路为：
+
+1. ROS Noetic 提供的 OMPL 1.6。
+2. 三维 RealVectorStateSpace(x, y, z)。
+3. InformedRRTstar 路径长度优化。
+4. OMPL PathSimplifier 的 reduceVertices、shortcutPath 和 smoothBSpline。
+5. TOPPRA 三维速度/加速度时间参数化。
+6. PX4/MAVROS 三机跟踪、投递与返航。
+
+障碍物按编队尺度进行水平 4.5 m、竖直 2.0 m 膨胀。状态边界为 x/y ±46 m、z 3~45 m。规划器允许通过爬升越过低障碍物，输出轨迹字段为 `[t,x,y,z]`。
+
+## 已安装依赖
+
+- ros-noetic-ompl
+- ros-noetic-octomap-server
+- ros-noetic-navigation
+- scipy
+- toppra
+
+OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线对照；当前静态场景首先使用与 Gazebo 障碍物一致的三维膨胀体作为 OMPL validity checker，避免从仿真真值到 OctoMap 的离散误差影响首轮验证。
+
+## 验证结果
+
+七个场景均完成 OMPL 3D + TOPPRA 规划。典型场景 0：
+
+- OMPL 平滑路径：约 166 个插值状态。
+- TOPPRA 轨迹：约 840 个 0.1 s 采样。
+- 高度范围：8.0~16.49 m。
+- 未放宽速度/加速度约束。
+- 任务播放器运行时目标高度验证覆盖同一范围。
+
+场景 1 在 37 m 已高于主要障碍物，因此最优路径保持恒高；其余复杂低空场景会按需要爬升或侧向绕障。
+
+## 启动
 
 ```bash
 source /opt/ros/noetic/setup.bash
 source ~/catkin_ws/devel/setup.bash
-source ~/PX4_Firmware/Tools/setup_gazebo.bash \
-  ~/PX4_Firmware ~/PX4_Firmware/build/px4_sitl_default
-export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:~/PX4_Firmware:~/PX4_Firmware/Tools/sitl_gazebo
-```
-
-## 启动上位机
-
-```bash
 roslaunch logistics_gazebo_sim operator_station.launch
 ```
-
-上位机可以选择场景、起点、终点、飞行高度和巡航队形。参数改变后会重新规划；规划失败、起终点无效、高度或净空不足时会显示对应错误，未通过检查时不会启动仿真。
-
-## 直接启动三机任务
-
-```bash
-roslaunch logistics_gazebo_sim three_uav_mission.launch \
-  scene_id:=0 spawn_x:=-40 spawn_y:=-40 target_z:=5 \
-  mission_config:=$(rospack find logistics_gazebo_sim)/config/mission_scene0.yaml
-```
-
-默认任务配置位于 `config/mission_scene*.yaml`，对应 scene 0～6。
-
-## 往返任务流程
-
-起点起飞 → 出发编队 → 前往配送点 → 投递点变为一字队形 → 下降并释放实体包裹 → 恢复巡航队形 → 返航 → 起点恢复降落队形 → 软降落并自动解除武装。
-
-紧急降落会终止正常任务流程，在当前位置执行受控下降。任务重置会清除当前进度并恢复初始状态。
-
-## 轨迹算法
-
-稳定版使用以下链路：
-
-1. 根据编队包络膨胀场景障碍物；
-2. 使用 NumPy 占据栅格 A* 搜索中心航路；
-3. 使用视线检测（LOS）简化路径；
-4. 使用原项目自定义的三次 B 样条平滑。该 B 样条不是 ROS 标准规划包实现；
-5. 使用 TOPPRA 对三维轨迹进行速度和加速度时间参数化；
-6. 逐机检查轨迹、编队间距和障碍净空；
-7. 通过 MAVROS 位置目标交给 PX4 OFFBOARD 控制器跟踪。
-
-当前缩放场景使用约 2.0 m/s 合速度和 1.0 m/s² 合加速度约束，TOPPRA 以零起终速度生成去程轨迹，返航按验证后的时间律反向执行。
-
-## 队形与安全
-
-支持正三角、倒三角、横队等基础队形。队形变换采用连续插值，并在变换期间检查无人机之间的最小安全距离。遇到窄通道或当前参数不可行时，规划器会拒绝任务并提示调整高度、队形或起终点。
-
-## 任务状态与记录
-
-- RViz：显示场景、起终点、无人机位置、目标点和飞行轨迹；
-- rqt：显示任务阶段、进度、安全状态和错误信息；
-- CSV：保存在 `~/.ros/logistics_runs/mission_*.csv`；
-- ROS/PX4/Gazebo 运行日志与构建缓存不进入 Git 版本库。
-
-## 构建
-
-```bash
-cd ~/catkin_ws
-source /opt/ros/noetic/setup.bash
-catkin build logistics_gazebo_sim
-```
-
-TOPPRA 和 SciPy 需在容器的 Python 3 环境中可用。

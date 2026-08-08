@@ -1,15 +1,12 @@
-# ROS 标准规划包三维实验版
+# ROS 三维规划算法演进记录
 
-## 隔离方式
+## 当前归属
 
-- 稳定版：`~/catkin_ws/src/logistics_gazebo_sim`
-- 实验版：`~/catkin_ws/src/logistics_gazebo_sim_ros`
-- ROS 包名：`logistics_gazebo_sim_ros`
-- 两个工程可同时编译，但控制台和仿真节点名称相同，运行时只启动一个版本。
+本文记录原 ROS/OMPL/TOPPRA 实验线的设计与验证过程。该实验线现已并入唯一主包 `~/catkin_ws/src/logistics_gazebo_sim`；统一前的双包结构仅保留在 Git 历史标签中。
 
 ## 算法链路
 
-实验版将稳定版自写 NumPy 栅格 A* 和自定义 B 样条替换为：
+该实验线验证并引入了以下算法链路：
 
 1. ROS Noetic 提供的 OMPL 1.6。
 2. 三维 RealVectorStateSpace(x, y, z)。
@@ -47,7 +44,5 @@ OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线�
 ```bash
 source /opt/ros/noetic/setup.bash
 source ~/catkin_ws/devel/setup.bash
-roslaunch logistics_gazebo_sim_ros operator_station.launch
+roslaunch logistics_gazebo_sim operator_station.launch
 ```
-
-界面标题包含“ROS OMPL 3D 实验版”，用于和稳定版区分。

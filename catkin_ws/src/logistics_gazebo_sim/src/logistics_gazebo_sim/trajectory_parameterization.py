@@ -133,3 +133,50 @@ def toppra_parameterize(path, blocked, velocity_limit=2.0,
         "max_speed": float(np.max(np.linalg.norm(velocities, axis=1))),
         "max_acceleration": float(np.max(np.linalg.norm(accelerations, axis=1))),
     }
+
+
+def toppra_parameterize_3d(waypoints, blocked, velocity_limit=2.0,
+                           acceleration_limit=1.0, sample_period=0.1):
+    """TOPPRA parameterization of an OMPL-smoothed xyz path."""
+    points=np.asarray(waypoints,dtype=float)
+    if len(points)<4:
+        raise RuntimeError("OMPL path has too few states")
+    segment=np.linalg.norm(np.diff(points,axis=0),axis=1)
+    chord=np.concatenate(([0.0],np.cumsum(segment)))
+    if chord[-1]<1e-6:
+        raise RuntimeError("OMPL path has zero length")
+    parameter=chord/chord[-1]
+    geometric_path=ta.SplineInterpolator(parameter,points)
+    velocity_axis=velocity_limit/np.sqrt(3.0)
+    acceleration_axis=acceleration_limit/np.sqrt(3.0)
+
+    def solve(v_axis,a_axis):
+        velocity=constraint.JointVelocityConstraint(
+            np.tile([-v_axis,v_axis],(3,1)))
+        acceleration=constraint.JointAccelerationConstraint(
+            np.tile([-a_axis,a_axis],(3,1)))
+        return algo.TOPPRA([velocity,acceleration],geometric_path,
+                           solver_wrapper="seidel").compute_trajectory(0.0,0.0)
+
+    trajectory=solve(velocity_axis,acceleration_axis)
+    relaxed=False
+    if trajectory is None:
+        trajectory=solve(velocity_axis*1.5,acceleration_axis*1.5)
+        relaxed=True
+    if trajectory is None:
+        raise RuntimeError("TOPPRA 3D constraints are infeasible")
+    duration=float(trajectory.duration)
+    times=np.arange(0.0,duration,sample_period)
+    if not len(times) or duration-times[-1]>1e-6:
+        times=np.append(times,duration)
+    positions=np.asarray(trajectory(times,0))
+    if any(blocked(tuple(point)) for point in positions):
+        raise RuntimeError("TOPPRA spline leaves OMPL free space")
+    velocities=np.asarray(trajectory(times,1))
+    accelerations=np.asarray(trajectory(times,2))
+    return {
+        "times":times,"positions":positions,"velocities":velocities,
+        "accelerations":accelerations,"duration":duration,"relaxed":relaxed,
+        "max_speed":float(np.max(np.linalg.norm(velocities,axis=1))),
+        "max_acceleration":float(np.max(np.linalg.norm(accelerations,axis=1))),
+    }

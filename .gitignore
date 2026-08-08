@@ -11,8 +11,6 @@
 /catkin_ws/src/*
 !/catkin_ws/src/logistics_gazebo_sim/
 !/catkin_ws/src/logistics_gazebo_sim/**
-!/catkin_ws/src/logistics_gazebo_sim_ros/
-!/catkin_ws/src/logistics_gazebo_sim_ros/**
 
 !/reference/
 /reference/*

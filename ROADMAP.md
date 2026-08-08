@@ -2,6 +2,8 @@
 
 本文档对应仓库 `forest157/multi-uav-logistics-gazebo` 的实际 Git 标签和当前开发方向。已发布版本记录已经完成并验证的能力；后续版本是开发计划，只有完成对应验收后才能合并到 `main` 并创建标签。
 
+当前主线从双包结构统一为 `catkin_ws/src/logistics_gazebo_sim`：0.4.1 的 OMPL、TOPPRA、动态避障和上位机实现作为唯一持续开发版本；统一前的两个目录可通过既有版本标签恢复。
+
 ## 总体架构方向
 
 ```text

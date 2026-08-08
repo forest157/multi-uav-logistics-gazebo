@@ -39,7 +39,7 @@ def _cylinder(name, x, y, radius, height):
 
 def _marker(name, point, colour):
     x, y = metric_xy(point)
-    return '<model name="{}"><static>true</static><pose>{:.3f} {:.3f} 0.011 0 0 0</pose><link name="link"><visual name="visual"><geometry><cylinder><radius>1.5</radius><length>0.02</length></cylinder></geometry><material><ambient>{}</ambient><diffuse>{}</diffuse></material></visual></link></model>\n'.format(_safe_name(name), x, y, colour, colour)
+    return '<model name="{}"><static>true</static><pose>{:.3f} {:.3f} -0.009 0 0 0</pose><link name="link"><visual name="visual"><cast_shadows>false</cast_shadows><geometry><cylinder><radius>1.5</radius><length>0.02</length></cylinder></geometry><material><ambient>{}</ambient><diffuse>{}</diffuse></material></visual></link></model>\n'.format(_safe_name(name), x, y, colour, colour)
 
 
 def render_world(scene_id):

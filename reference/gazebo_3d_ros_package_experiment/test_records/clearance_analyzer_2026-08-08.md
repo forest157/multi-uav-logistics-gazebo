@@ -3,7 +3,7 @@
 ## 测试范围
 
 - 分支：feature/clearance-analyzer
-- 包：logistics_gazebo_sim_ros
+- 包：logistics_gazebo_sim
 - 舰队：3架三角队形
 - 队形水平包络：约2.932 m
 - 净空采样间隔：0.5 m

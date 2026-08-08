@@ -4,10 +4,9 @@
 
 ## 目录
 
-- `catkin_ws/src/logistics_gazebo_sim`：稳定版本
-- `catkin_ws/src/logistics_gazebo_sim_ros`：ROS/OMPL/TOPPRA 三维规划实验版本
+- `catkin_ws/src/logistics_gazebo_sim`：统一的主 ROS 包，包含 Gazebo/PX4 仿真、OMPL 三维规划、TOPPRA 时间参数化和 ORCA 局部避障
 - `reference/gazebo_3d_upgrade_docs`：升级设计、决策和测试记录
-- `reference/gazebo_3d_ros_package_experiment`：ROS 算法实验说明
+- `reference/gazebo_3d_ros_package_experiment`：算法演进与实验记录
 
 构建产物、ROS/Gazebo/PX4 运行日志、缓存及用户配置均不进入版本控制。
 
@@ -22,14 +21,14 @@
 ```bash
 cd /home/devuser/catkin_ws
 source /opt/ros/noetic/setup.bash
-catkin build logistics_gazebo_sim logistics_gazebo_sim_ros
+catkin build logistics_gazebo_sim
 ```
 
-实验版控制台：
+启动上位机：
 
 ```bash
 source /home/devuser/catkin_ws/devel/setup.bash
-roslaunch logistics_gazebo_sim_ros operator_station.launch
+roslaunch logistics_gazebo_sim operator_station.launch
 ```
 
 ## 版本策略

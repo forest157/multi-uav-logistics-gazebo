@@ -21,6 +21,15 @@ class WorldTest(unittest.TestCase):
                 self.assertGreater(obstacle["height"], 0.0)
                 self.assertLessEqual(obstacle["height"], 35.0)
 
+    def test_zone_markers_are_visual_decals_without_collision(self):
+        root = ElementTree.fromstring(render_world(0))
+        models = {model.attrib["name"]: model for model in root.findall("world/model")}
+        for name in ("start_zone", "goal_zone"):
+            marker = models[name]
+            self.assertLess(float(marker.find("pose").text.split()[2]), 0.0)
+            self.assertIsNone(marker.find("link/collision"))
+            self.assertIsNotNone(marker.find("link/visual"))
+
 
 if __name__ == "__main__":
     unittest.main()

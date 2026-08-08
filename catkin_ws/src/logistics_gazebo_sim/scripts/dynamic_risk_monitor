@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Predict short-horizon fleet clearance from live dynamic-obstacle states."""
+import json
+import math
+
+import rospy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import Header, String
+
+from logistics_gazebo_sim.dynamic_obstacles import assess_fleet_separation, assess_timed_path, prediction_path
+
+
+class DynamicRiskMonitor:
+    def __init__(self):
+        self.count = int(rospy.get_param("~vehicle_count", 3))
+        self.scene_id = int(rospy.get_param("~scene_id", 0))
+        self.horizon = float(rospy.get_param("~horizon_s", 8.0))
+        self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
+        self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
+        self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
+        self.orca_required_clearance = float(rospy.get_param("~orca_required_clearance_m", 0.5))
+        self.local_avoidance_algorithm = str(rospy.get_param(
+            "~local_avoidance_algorithm", "collective_offset"))
+        sx = float(rospy.get_param("~spawn_x", -40.0))
+        sy = float(rospy.get_param("~spawn_y", -40.0))
+        spacing = float(rospy.get_param("~spawn_spacing_m", 3.0))
+        middle = (self.count - 1) * 0.5
+        self.origins = [(sx + (index-middle)*spacing, sy)
+                        for index in range(self.count)]
+        self.poses = [None] * self.count
+        self.targets = [None] * self.count
+        self.obstacles = []
+        self.last_obstacle_stamp = None
+        self.predicted_paths = None
+        self.last_prediction_stamp = None
+        self.cached_avoidance = None
+        self.request_sequence = 0
+        self.pending_request = None
+        self.last_request_stamp = None
+        self.request_period = rospy.Duration(1.0)
+        self.request_timeout = rospy.Duration(2.0)
+        for index in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),
+                             PoseStamped, self.pose_cb, callback_args=index, queue_size=1)
+            rospy.Subscriber("/uav{}/nominal_target_pose".format(index), PoseStamped,
+                             self.target_cb, callback_args=index, queue_size=1)
+        rospy.Subscriber("/dynamic_obstacles/state", String,
+                         self.obstacles_cb, queue_size=1)
+        rospy.Subscriber("/fleet/nominal_prediction", String,
+                         self.prediction_cb, queue_size=1)
+        self.risk_pub = rospy.Publisher("/fleet/dynamic_risk", String,
+                                        queue_size=5, latch=True)
+        rospy.Subscriber("/fleet/avoidance_plan",String,self.plan_cb,queue_size=1)
+        self.request_pub=rospy.Publisher("/fleet/avoidance_request",String,queue_size=1)
+        self.diag_pub = rospy.Publisher("/fleet/dynamic_diagnostics",
+                                        DiagnosticArray, queue_size=5)
+
+    def pose_cb(self, message, index):
+        self.poses[index] = message.pose.position
+
+    def target_cb(self, message, index):
+        self.targets[index] = message.pose.position
+
+    def obstacles_cb(self, message):
+        try:
+            payload = json.loads(message.data)
+            self.obstacles = payload.get("obstacles", [])
+            self.last_obstacle_stamp = rospy.Time.now()
+        except (TypeError, ValueError) as error:
+            rospy.logerr_throttle(2.0, "invalid dynamic obstacle state: %s", error)
+
+    def prediction_cb(self, message):
+        try:
+            raw=json.loads(message.data).get("paths",[])
+            if len(raw)!=self.count:
+                raise ValueError("prediction vehicle count mismatch")
+            checked=[]
+            for path in raw:
+                rows=[[float(axis) for axis in row] for row in path]
+                if len(rows)<2 or any(len(row)!=4 for row in rows):
+                    raise ValueError("prediction rows must be [t,x,y,z]")
+                if any(rows[index+1][0]<=rows[index][0]
+                       for index in range(len(rows)-1)):
+                    raise ValueError("prediction timestamps must increase")
+                checked.append(rows)
+            self.predicted_paths=checked
+            self.last_prediction_stamp=rospy.Time.now()
+        except (TypeError,ValueError) as error:
+            rospy.logerr_throttle(2.0,"invalid fleet prediction: %s",error)
+
+    def paths_for_report(self):
+        fresh=(self.predicted_paths is not None and
+               self.last_prediction_stamp is not None and
+               rospy.Time.now()-self.last_prediction_stamp<rospy.Duration(0.5))
+        if not fresh:
+            return [self.path_for(index) for index in range(self.count)]
+        result=[]
+        for index,path in enumerate(self.predicted_paths):
+            ox,oy=self.origins[index]
+            converted=[[row[0],row[1]+ox,row[2]+oy,row[3]] for row in path]
+            pose=self.poses[index]
+            converted[0]=[0.0,pose.x+ox,pose.y+oy,pose.z]
+            result.append(converted)
+        return result
+
+    def path_for(self, index):
+        pose, target = self.poses[index], self.targets[index]
+        ox, oy = self.origins[index]
+        start = (pose.x+ox, pose.y+oy, pose.z)
+        end = (target.x+ox, target.y+oy, target.z)
+        return prediction_path(start, end, self.horizon)
+
+    def plan_cb(self, message):
+        try:
+            payload=json.loads(message.data)
+            if payload.get("request_id")!=self.pending_request:
+                return
+            self.cached_avoidance=payload.get("avoidance")
+            self.pending_request=None
+        except (TypeError,ValueError) as error:
+            rospy.logerr_throttle(2.0,"invalid avoidance plan: %s",error)
+
+    def request_plan(self, paths):
+        now=rospy.Time.now()
+        if (self.pending_request is not None and
+                self.last_request_stamp is not None and
+                now-self.last_request_stamp>=self.request_timeout):
+            rospy.logwarn_throttle(2.0,"avoidance request timed out; retrying")
+            self.pending_request=None;self.cached_avoidance=None
+        due=(self.pending_request is None and
+             (self.last_request_stamp is None or
+              now-self.last_request_stamp>=self.request_period))
+        if due:
+            self.request_sequence+=1
+            self.pending_request=self.request_sequence
+            request={"request_id":self.pending_request,"paths":paths,
+                     "obstacles":self.obstacles,
+                     "options":{"algorithm":self.local_avoidance_algorithm,
+                         "horizon":self.horizon,"scene_id":self.scene_id,
+                         "minimum_separation":self.minimum_separation}}
+            self.request_pub.publish(json.dumps(request,separators=(",",":")))
+            self.last_request_stamp=now
+        return self.cached_avoidance or {
+            "viable":False,"selected_offset":None,
+            "reason":"avoidance planner pending","candidates":[],
+            "minimum_clearance_m":None,
+            "rejection_summary":{"PLANNER_PENDING":1}}
+
+    def report(self):
+        if self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp>rospy.Duration(1.0):
+            self.obstacles=[]
+        if not self.obstacles:
+            return {"level": "STALE", "message": "等待动态障碍数据",
+                    "vehicle_reports": [], "obstacle_count": 0}
+        if any(value is None for value in self.poses+self.targets):
+            return {"level": "STALE", "message": "等待无人机位姿与目标",
+                    "vehicle_reports": [], "obstacle_count": len(self.obstacles)}
+        reports = []
+        paths=self.paths_for_report()
+        order = {"SAFE": 0, "WARNING": 1, "CRITICAL": 2}
+        for index in range(self.count):
+            value = assess_timed_path(
+                paths[index], self.obstacles, horizon=self.horizon,
+                warning_clearance=self.warning)
+            value["vehicle_id"] = "uav{}".format(index)
+            reports.append(value)
+        level = max((value["level"] for value in reports),
+                    key=lambda value: order[value])
+        separation=assess_fleet_separation(
+            paths,horizon=self.horizon,minimum_separation=self.minimum_separation)
+        if not separation["safe"]:level="CRITICAL"
+        if level in ("WARNING","CRITICAL"):
+            avoidance=self.request_plan(paths)
+        else:
+            self.cached_avoidance=None;self.pending_request=None
+            self.last_request_stamp=None
+            avoidance={"viable":False,"selected_offset":None,
+                "reason":"avoidance not required","candidates":[],"minimum_clearance_m":None}
+        nearest = min(reports, key=lambda value:
+                      float("inf") if value["minimum_clearance_m"] is None
+                      else value["minimum_clearance_m"])
+        return {"level": level, "message": "动态障碍风险{}".format(level),
+                "vehicle_reports": reports, "obstacle_count": len(self.obstacles),
+                "nearest_vehicle": nearest["vehicle_id"],
+                "minimum_clearance_m": nearest["minimum_clearance_m"],
+                "time_to_conflict_s": nearest["time_to_conflict_s"],
+                "fleet_separation":separation,
+                "local_avoidance_algorithm":self.local_avoidance_algorithm,
+                "avoidance":avoidance}
+
+    def publish(self, report):
+        self.risk_pub.publish(json.dumps(report, ensure_ascii=False,
+                                         separators=(",", ":")))
+        levels = {"SAFE": DiagnosticStatus.OK, "WARNING": DiagnosticStatus.WARN,
+                  "CRITICAL": DiagnosticStatus.ERROR, "STALE": DiagnosticStatus.STALE}
+        status = DiagnosticStatus(
+            level=levels[report["level"]], name="logistics_fleet/dynamic_risk",
+            hardware_id="gazebo_sitl", message=report["message"])
+        status.values = [
+            KeyValue("obstacle_count", str(report["obstacle_count"])),
+            KeyValue("minimum_clearance_m",
+                     str(report.get("minimum_clearance_m", "unknown"))),
+            KeyValue("time_to_conflict_s",
+                     str(report.get("time_to_conflict_s", "none"))),
+            KeyValue("minimum_separation_m", str(
+                (report.get("fleet_separation") or {}).get(
+                    "minimum_separation_m", "unknown")))]
+        self.diag_pub.publish(DiagnosticArray(
+            header=Header(stamp=rospy.Time.now()), status=[status]))
+
+    def run(self):
+        rate = rospy.Rate(5.0)
+        while not rospy.is_shutdown():
+            try:
+                report=self.report()
+            except Exception as error:
+                rospy.logerr_throttle(2.0,"risk cycle failed safely: %s",error)
+                report={"level":"CRITICAL",
+                    "message":"动态风险计算异常，机队已安全悬停",
+                    "vehicle_reports":[],"obstacle_count":len(self.obstacles),
+                    "nearest_vehicle":None,"minimum_clearance_m":None,
+                    "time_to_conflict_s":0.0,
+                    "fleet_separation":{"safe":False,
+                        "minimum_separation_m":None,"time_to_conflict_s":0.0},
+                    "avoidance":{"viable":False,"selected_offset":None,
+                        "reason":"risk computation failure","candidates":[],
+                        "minimum_clearance_m":None}}
+            self.publish(report)
+            try: rate.sleep()
+            except rospy.ROSInterruptException: break
+
+
+if __name__ == "__main__":
+    rospy.init_node("dynamic_risk_monitor")
+    DynamicRiskMonitor().run()
