@@ -1,6 +1,8 @@
 import json
 import os
+import shutil
 import signal
+import socket
 import rospy
 import rospkg
 from diagnostic_msgs.msg import DiagnosticArray
@@ -140,20 +142,40 @@ class OperatorPlugin(Plugin):
         stdout=bytes(self.analysis_process.readAllStandardOutput()).decode("utf-8","replace").strip()
         stderr=bytes(self.analysis_process.readAllStandardError()).decode("utf-8","replace").strip()
         if exit_code or not self.analysis_report or not os.path.isfile(self.analysis_report) or not os.path.isfile(self.analysis_mission):
-            detail=stderr or stdout or "规划器未生成分析报告"
+            detail=stderr or stdout or "规划器未生成分析报告";diagnostic=None
+            if self.analysis_report and os.path.isfile(self.analysis_report):
+                try:
+                    with open(self.analysis_report,"r",encoding="utf-8") as stream:
+                        diagnostic=json.load(stream).get("diagnostic")
+                except (OSError,ValueError):diagnostic=None
             environment_markers=("object is not callable","object is not iterable",
                                  "keywords must be strings","Parameter' object",
-                                 "unsupported operand type")
-            if self.analysis_retry<1 and any(marker in detail for marker in environment_markers):
+                                 "unsupported operand type","SafeDumper","SafeLoader")
+            is_environment=(diagnostic and diagnostic.get("category")=="ENVIRONMENT") or any(marker in detail for marker in environment_markers)
+            if self.analysis_retry<1 and is_environment:
                 self.analysis_retry+=1;self.analysis_state.setText("环境异常，正在自动重试…")
                 self.analysis_detail.setText(detail[:320]);QTimer.singleShot(150,self.start_analysis);return
             self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
-            self.analysis_state.setText("当前参数不可执行")
-            self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
-            self.analysis_detail.setText(self.planning_error(detail)[:700]);return
+            if diagnostic:
+                names={"INPUT":"输入无效","FEASIBILITY":"任务不可行",
+                       "PLANNING":"当前时间内未找到路径","DYNAMICS":"动力学轨迹不可行",
+                       "ENVIRONMENT":"运行环境异常","INTERNAL":"规划系统异常"}
+                self.analysis_state.setText(names.get(diagnostic.get("category"),"当前参数不可执行"))
+                suggestion_names={"select_valid_scene":"重新选择场景","adjust_altitude":"调整高度","move_start_or_goal":"移动起点或终点","move_start":"移动起点","move_goal":"移动终点","use_compact_formation":"改用紧凑队形","use_alternate_landing_site":"选择备用降落点","increase_altitude":"提高高度","use_flat_formation":"改用平面队形","use_column":"改用纵向一字","use_vertical_formation":"改用垂直错层","replan_path":"重新规划","retry":"重试","increase_planning_time":"增加规划时间","adjust_route":"调整路线","change_formation":"更换队形","adjust_spacing":"调整间距","reduce_speed":"降低速度","rebuild_workspace":"重新构建工作空间","check_installation":"检查安装","inspect_planner_log":"检查规划日志","inspect_environment":"检查运行环境","inspect_log":"检查日志"}
+                suggestions="、".join(suggestion_names.get(item,item) for item in (diagnostic.get("suggestions") or []))
+                message=diagnostic.get("message","规划失败")
+                extra=diagnostic.get("detail","")
+                context=diagnostic.get("context") or {};location=context.get("location");obstacle=context.get("obstacle")
+                where=("\n位置：{}".format(location) if location else "")+("，障碍物：{}".format(obstacle) if obstacle else "")
+                self.analysis_detail.setText((message+where+("\n建议："+suggestions if suggestions else "")+
+                                              ("\n详情："+extra[:320] if extra and extra!=message else ""))[:700])
+            else:
+                self.analysis_state.setText("当前参数不可执行")
+                self.analysis_detail.setText(self.planning_error(detail)[:700])
+            self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;");return
         try:
             with open(self.analysis_report,"r",encoding="utf-8") as stream:report=json.load(stream)
-            clearance=report["clearance_analysis"];trajectory=report["trajectory_parameterization"];stages=report["stages"]
+            clearance=report["clearance_analysis"];trajectory=report["trajectory_parameterization"];stages=report["stages"];phases=report.get("phase_analysis",{})
             available=float(clearance["minimum_horizontal_clearance_m"]);required=float(clearance["required"]["horizontal_m"]);margin=available-required
             location=clearance.get("critical_location",["-","-","-"]);obstacle=clearance.get("critical_obstacle") or "世界边界"
             self.analysis_state.setText("规划可行 · 净空安全余量 {:.2f} m".format(margin))
@@ -161,17 +183,47 @@ class OperatorPlugin(Plugin):
             self.analysis_state.setStyleSheet("color:{};border-color:{};".format(color,border))
             self.analysis_detail.setText(
                 "最小水平净空 {:.2f} m / 所需 {:.2f} m；危险对象：{}，位置 ({:.1f}, {:.1f}, {:.1f})\n"
-                "地板余量 {:.2f} m，顶部余量 {:.2f} m；预计出航 {:.1f} s，最大速度 {:.2f} m/s，最大加速度 {:.2f} m/s²".format(
+                "地板余量 {:.2f} m，顶部余量 {:.2f} m；预计出航 {:.1f} s，最大速度 {:.2f} m/s，最大加速度 {:.2f} m/s²\n"
+                "起飞/巡航/投递/返航共 {} 项检查通过；{} 次队形变换将启用安全距离缩放".format(
                     available,required,obstacle,float(location[0]),float(location[1]),float(location[2]),
                     float(clearance["minimum_floor_clearance_m"]),float(clearance["minimum_ceiling_clearance_m"]),
                     float(stages["outbound_end"])-18.0,float(trajectory["actual_max_speed_mps"]),
-                    float(trajectory["actual_max_acceleration_mps2"])))
+                    float(trajectory["actual_max_acceleration_mps2"]),len(phases),
+                    sum(1 for value in phases.values() if value.get("safety_scaling_required"))))
         except (OSError,ValueError,KeyError,TypeError) as exc:
             self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
             self.analysis_state.setText("分析报告无效")
             self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
             self.analysis_detail.setText("无法读取规划摘要：{}".format(exc));return
         self.valid_analysis_signature=signature;self.start_sim.setEnabled(True)
+    def active_runtime_processes(self):
+        result=[]
+        for name in os.listdir("/proc"):
+            if not name.isdigit():continue
+            try:
+                with open("/proc/{}/stat".format(name),"r") as stream:state=stream.read().split()[2]
+                with open("/proc/{}/cmdline".format(name),"rb") as stream:command=stream.read().replace(b"\0",b" ").decode("utf-8","ignore")
+            except (OSError,IndexError):continue
+            if state!="Z" and any(token in command for token in ("three_uav_mission.launch","/px4 ","px4 -i")):
+                result.append((int(name),command.strip()))
+        return result
+    def preflight_errors(self):
+        errors=[]
+        if not self.analysis_mission or not os.path.isfile(self.analysis_mission) or os.path.getsize(self.analysis_mission)<100:
+            errors.append("已验证任务文件缺失或为空")
+        if not os.access("/tmp",os.W_OK):errors.append("/tmp 不可写")
+        try:
+            if shutil.disk_usage("/tmp").free<100*1024*1024:errors.append("临时磁盘剩余空间不足100 MB")
+        except OSError:errors.append("无法检查临时磁盘")
+        try:rospy.get_master().getPid()
+        except Exception:errors.append("ROS master不可用")
+        active=self.active_runtime_processes()
+        if active:errors.append("检测到未清理的飞行任务进程：{}".format(",".join(str(item[0]) for item in active)))
+        probe=socket.socket(socket.AF_INET,socket.SOCK_STREAM);probe.settimeout(.15)
+        try:
+            if probe.connect_ex(("127.0.0.1",11460))==0:errors.append("Gazebo端口11460已被占用")
+        finally:probe.close()
+        return errors
     def begin_pick(self,mode):
         self.pick_mode=mode;self.state.setText("请在 RViz 工具栏选择 Publish Point，然后点击地图")
     def clicked_point_cb(self,msg):
@@ -216,6 +268,9 @@ class OperatorPlugin(Plugin):
         if self.process.state()!=QProcess.NotRunning:QMessageBox.information(self.widget,"\u63d0\u793a","\u4eff\u771f\u5df2\u7ecf\u5728\u8fd0\u884c");return
         if self.valid_analysis_signature!=self.parameter_signature() or not self.analysis_mission or not os.path.isfile(self.analysis_mission):
             QMessageBox.warning(self.widget,"规划尚未就绪","当前参数还没有通过三维规划与净空分析，请等待分析完成或调整参数。");self.schedule_analysis();return
+        preflight=self.preflight_errors()
+        if preflight:
+            QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
         self.cleanup_px4_sockets();args=["logistics_gazebo_sim_ros","three_uav_mission.launch","gui:=true","auto_start:=false","scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.process.start("setsid",["roslaunch"]+args);self.state.setText("\u89c4\u5212\u6210\u529f\uff0c\u4eff\u771f\u542f\u52a8\u4e2d")
