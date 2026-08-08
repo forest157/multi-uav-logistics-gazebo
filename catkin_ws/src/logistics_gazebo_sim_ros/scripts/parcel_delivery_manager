@@ -2,7 +2,7 @@
 """Physical parcel carry and release for the three-UAV Gazebo mission."""
 import json
 import rospy
-from gazebo_msgs.msg import ModelState
+from gazebo_msgs.msg import ModelState, ModelStates
 from gazebo_msgs.srv import DeleteModel, GetLinkProperties, GetModelState, SetLinkProperties, SetModelState, SpawnModel
 from std_msgs.msg import String
 
@@ -15,6 +15,7 @@ def parcel_sdf(name,material,static):
 class ParcelDelivery:
     def __init__(self):
         self.names=["delivery_parcel_%d"%i for i in range(3)]
+        self.known_models=set()
         self.attached=[False]*3;self.released=False;self.settled=[False]*3;self.release_time=None;self.last_elapsed=0.0
         self.spawn=rospy.ServiceProxy("/gazebo/spawn_sdf_model",SpawnModel)
         self.delete=rospy.ServiceProxy("/gazebo/delete_model",DeleteModel)
@@ -23,13 +24,20 @@ class ParcelDelivery:
         self.set_link=rospy.ServiceProxy("/gazebo/set_link_properties",SetLinkProperties)
         self.set_state=rospy.ServiceProxy("/gazebo/set_model_state",SetModelState)
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=5)
+        rospy.Subscriber("/gazebo/model_states",ModelStates,self.models_cb,queue_size=1)
         rospy.Timer(rospy.Duration(0.05),self.follow)
         rospy.loginfo("Parcel delivery manager ready")
+    def models_cb(self,msg):
+        self.known_models=set(msg.name)
+
     def safe_delete(self,name):
-        try:self.delete(name)
+        try:self.delete(name);self.known_models.discard(name)
         except rospy.ServiceException:pass
     def spawn_one(self,i,pose,static):
-        try:return self.spawn(self.names[i],parcel_sdf(self.names[i],COLORS[i],static),"",pose,"world").success
+        try:
+            success=self.spawn(self.names[i],parcel_sdf(self.names[i],COLORS[i],static),"",pose,"world").success
+            if success:self.known_models.add(self.names[i])
+            return success
         except rospy.ServiceException as exc:
             rospy.logwarn_throttle(5.0,"Parcel spawn failed: %s",exc);return False
     def set_gravity(self,name,enabled):
@@ -38,8 +46,8 @@ class ParcelDelivery:
     def attach_all(self):
         for i,model in enumerate(UAV_MODELS):
             if self.attached[i]:continue
-            existing=self.get_state(self.names[i],"world")
-            if existing.success:
+            existing=self.get_state(self.names[i],"world") if self.names[i] in self.known_models else None
+            if existing is not None and existing.success:
                 try:self.attached[i]=self.set_gravity(self.names[i],False)
                 except rospy.ServiceException:continue
                 if self.attached[i]:continue

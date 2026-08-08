@@ -194,7 +194,7 @@ def shifted_path(path, offset):
 
 
 def assess_fleet_separation(paths, horizon=8.0, sample_period=0.1,
-                            minimum_separation=3.0):
+                            minimum_separation=3.0, tracking_tolerance=0.05):
     """Sample synchronized paths and enforce pairwise 3D separation."""
     arrays = [np.asarray(path, dtype=float) for path in paths]
     if not arrays:
@@ -227,13 +227,14 @@ def assess_fleet_separation(paths, horizon=8.0, sample_period=0.1,
                     closest_pair = ["uav{}".format(first),
                                     "uav{}".format(second)]
                     closest_time = float(query_time - start)
-                if distance < required and first_conflict is None:
+                if distance < required - float(tracking_tolerance) and first_conflict is None:
                     first_conflict = float(query_time - start)
     return {
-        "safe": closest >= required,
+        "safe": closest + float(tracking_tolerance) >= required,
         "minimum_separation_m": (None if closest_pair is None
                                   else round(closest, 3)),
         "required_separation_m": required,
+        "tracking_tolerance_m": float(tracking_tolerance),
         "closest_pair": closest_pair,
         "closest_time_s": (None if closest_time is None
                            else round(closest_time, 3)),
@@ -285,7 +286,7 @@ def validate_static_paths(scene_id, paths):
 
 def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0,
                               required_clearance=0.5,warning_clearance=2.0,
-                              scene_id=None,minimum_separation=3.0):
+                              scene_id=None,minimum_separation=3.0, tracking_tolerance=0.05):
     """Select one rigid 3D offset safe for every vehicle, or reject all."""
     if not paths:raise DynamicObstacleError("at least one vehicle path is required")
     offsets=collective_avoidance_candidates(paths) if candidate_offsets is None else candidate_offsets
@@ -297,7 +298,8 @@ def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0
         minimum=min(clearances) if clearances else float("inf")
         static=validate_static_paths(scene_id,shifted) if scene_id is not None else {"feasible":True,"error_code":None,"message":"static validation disabled"}
         separation=assess_fleet_separation(
-            shifted,horizon=horizon,minimum_separation=minimum_separation)
+            shifted,horizon=horizon,minimum_separation=minimum_separation,
+            tracking_tolerance=tracking_tolerance)
         if any(report["level"]=="CRITICAL" for report in reports):rejection="DYNAMIC_CONFLICT"
         elif clearances and minimum<float(required_clearance):rejection="DYNAMIC_CLEARANCE"
         elif not separation["safe"]:rejection="VEHICLE_SEPARATION"

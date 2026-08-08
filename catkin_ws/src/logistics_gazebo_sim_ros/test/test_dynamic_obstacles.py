@@ -166,5 +166,25 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertFalse(result["viable"])
         self.assertEqual(result["rejection_summary"]["VEHICLE_SEPARATION"],1)
 
+    def test_fleet_separation_allows_small_tracking_tolerance(self):
+        paths=[
+            [[0.0,0.0,0.0,5.0],[8.0,8.0,0.0,5.0]],
+            [[0.0,0.0,2.98,5.0],[8.0,8.0,2.98,5.0]],
+        ]
+        report=assess_fleet_separation(
+            paths,minimum_separation=3.0,tracking_tolerance=0.05)
+        self.assertTrue(report["safe"])
+        self.assertAlmostEqual(report["minimum_separation_m"],2.98)
+
+    def test_fleet_separation_rejects_beyond_tracking_tolerance(self):
+        paths=[
+            [[0.0,0.0,0.0,5.0],[8.0,8.0,0.0,5.0]],
+            [[0.0,0.0,2.9,5.0],[8.0,8.0,2.9,5.0]],
+        ]
+        report=assess_fleet_separation(
+            paths,minimum_separation=3.0,tracking_tolerance=0.05)
+        self.assertFalse(report["safe"])
+
+
 if __name__ == "__main__":
     unittest.main()
