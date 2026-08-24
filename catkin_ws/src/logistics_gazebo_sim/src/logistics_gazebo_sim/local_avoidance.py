@@ -19,6 +19,49 @@ def _clamp(vector, limit):
     return vector if norm<=limit or norm<1e-9 else vector*(limit/norm)
 
 
+class OrcaCommandGate:
+    """Fail-closed conditioning for ORCA velocity commands before flight use."""
+    def __init__(self, vehicle_count, max_speed=2.0, max_climb_rate=0.8,
+                 max_acceleration=1.0, smoothing=0.35, timeout=0.6):
+        self.vehicle_count=int(vehicle_count);self.max_speed=float(max_speed)
+        self.max_climb_rate=float(max_climb_rate);self.max_acceleration=float(max_acceleration)
+        self.smoothing=float(smoothing);self.timeout=float(timeout)
+        if self.vehicle_count<1 or min(self.max_speed,self.max_climb_rate,self.max_acceleration,self.timeout)<=0.0:
+            raise DynamicObstacleError("ORCA command limits must be positive")
+        if not 0.0<self.smoothing<=1.0:
+            raise DynamicObstacleError("ORCA smoothing must be in (0,1]")
+        self.reset()
+    def reset(self):
+        self.previous=[np.zeros(3,dtype=float) for _ in range(self.vehicle_count)]
+    def condition(self, plan, now, dt):
+        if not isinstance(plan,dict) or not plan.get("viable"):
+            raise DynamicObstacleError("ORCA plan is not viable")
+        if plan.get("contract_version")!="orca_velocity_v1" or plan.get("algorithm")!="orca3d" or plan.get("command_type")!="per_vehicle_velocity":
+            raise DynamicObstacleError("unexpected ORCA command contract")
+        stamp=float(plan.get("stamp",-1.0))
+        age=float(now)-stamp
+        validity=min(self.timeout,float(plan.get("valid_for_s",self.timeout)))
+        if not np.isfinite(stamp) or validity<=0.0 or age<0.0 or age>validity:
+            raise DynamicObstacleError("ORCA command is stale")
+        commands=plan.get("commands")
+        if not isinstance(commands,list) or len(commands)!=self.vehicle_count:
+            raise DynamicObstacleError("ORCA command vehicle count mismatch")
+        by_id={item.get("vehicle_id"):item for item in commands if isinstance(item,dict)}
+        expected={"uav{}".format(index) for index in range(self.vehicle_count)}
+        if set(by_id)!=expected:
+            raise DynamicObstacleError("ORCA command vehicle ids mismatch")
+        step=max(1e-3,float(dt));result=[]
+        for index in range(self.vehicle_count):
+            desired=_clamp(_vector(by_id["uav{}".format(index)].get("velocity"),"ORCA velocity"),self.max_speed)
+            desired[2]=max(-self.max_climb_rate,min(self.max_climb_rate,desired[2]))
+            delta=_clamp(desired-self.previous[index],self.max_acceleration*step)
+            limited=self.previous[index]+delta
+            filtered=self.previous[index]+self.smoothing*(limited-self.previous[index])
+            self.previous[index]=filtered
+            result.append(tuple(float(value) for value in filtered))
+        return result
+
+
 def _path_state(path, lookahead):
     values=np.asarray(path,dtype=float)
     if values.ndim!=2 or values.shape[1]!=4 or len(values)<2:

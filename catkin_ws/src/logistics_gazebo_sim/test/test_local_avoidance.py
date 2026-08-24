@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from logistics_gazebo_sim.local_avoidance import (
-    CollectiveOffsetPlanner, Orca3DPlanner, available_local_planners,
+    CollectiveOffsetPlanner, Orca3DPlanner, OrcaCommandGate, available_local_planners,
     create_local_planner)
 from logistics_gazebo_sim.dynamic_obstacles import DynamicObstacleError
 
@@ -44,6 +44,27 @@ class LocalAvoidanceTest(unittest.TestCase):
         obstacle={"id":"bird","position":[2,0,8],"velocity":[0,0,0],"radius":1.0,"height":1.0}
         result=Orca3DPlanner().plan([[[0,0,0,8],[4,8,0,8]]],[obstacle],max_speed=3.0)
         self.assertGreater(result["commands"][0]["correction_norm"],0.0)
+    def test_orca_command_gate_limits_and_smooths_velocity(self):
+        gate=OrcaCommandGate(2,max_speed=2.0,max_climb_rate=0.5,
+            max_acceleration=1.0,smoothing=0.5,timeout=0.6)
+        plan={"viable":True,"algorithm":"orca3d",
+            "command_type":"per_vehicle_velocity","contract_version":"orca_velocity_v1","valid_for_s":0.6,"stamp":10.0,
+            "commands":[{"vehicle_id":"uav0","velocity":[4,0,2]},
+                        {"vehicle_id":"uav1","velocity":[0,-4,-2]}]}
+        values=gate.condition(plan,10.2,0.2)
+        self.assertEqual(len(values),2)
+        self.assertLessEqual(np.linalg.norm(values[0]),0.1001)
+        self.assertLessEqual(abs(values[0][2]),0.0501)
+
+    def test_orca_command_gate_rejects_stale_or_incomplete_plan(self):
+        gate=OrcaCommandGate(2,timeout=0.5)
+        plan={"viable":True,"algorithm":"orca3d",
+            "command_type":"per_vehicle_velocity","contract_version":"orca_velocity_v1","valid_for_s":0.6,"stamp":1.0,
+            "commands":[{"vehicle_id":"uav0","velocity":[0,0,0]}]}
+        with self.assertRaises(DynamicObstacleError):gate.condition(plan,1.1,0.1)
+        plan["commands"].append({"vehicle_id":"uav1","velocity":[0,0,0]})
+        with self.assertRaises(DynamicObstacleError):gate.condition(plan,2.0,0.1)
+
     def test_collective_adapter_preserves_legacy_contract(self):
         result=CollectiveOffsetPlanner().plan(self.paths(),[],candidate_offsets=[[0,0,0]])
         self.assertTrue(result["viable"]);self.assertEqual(result["algorithm"],"collective_offset")
