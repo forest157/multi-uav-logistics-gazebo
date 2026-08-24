@@ -14,6 +14,7 @@
 4. OMPL PathSimplifier 的 reduceVertices、shortcutPath 和 smoothBSpline。
 5. TOPPRA 三维速度/加速度时间参数化。
 6. PX4/MAVROS 三机跟踪、投递与返航。
+7. `collective_offset` 闭环避障与 `orca3d` 影子模式，外加独立风险监测和安全回退。
 
 障碍物按编队尺度进行水平 4.5 m、竖直 2.0 m 膨胀。状态边界为 x/y ±46 m、z 3~45 m。规划器允许通过爬升越过低障碍物，输出轨迹字段为 `[t,x,y,z]`。
 
@@ -32,6 +33,8 @@
 OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线对照；当前静态场景首先使用与 Gazebo 障碍物一致的三维膨胀体作为 OMPL validity checker，避免从仿真真值到 OctoMap 的离散误差影响首轮验证。
 
 ## 验证结果
+
+当前统一基线通过 61 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已完成 Gazebo 三机影子模式验证，但尚未直接接管 PX4。
 
 七个场景均完成 OMPL 3D + TOPPRA 规划。典型场景 0：
 

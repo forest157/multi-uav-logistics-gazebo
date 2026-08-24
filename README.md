@@ -16,11 +16,15 @@
 
 完成教程后，请确认容器内存在 `/home/devuser/PX4_Firmware`、ROS Noetic 可以正常加载，再按下方命令构建本项目；首次构建成功后才会生成 `~/catkin_ws/devel/setup.bash`。
 
+## 当前版本
+
+当前稳定基线为 `v0.4.1`，`main` 已统一为单一 ROS 包。ORCA 当前处于影子模式，只生成和评估逐机速度建议，尚未直接控制 PX4；下一阶段是 `v0.4.2` 受限闭环接管。
+
 ## 版本历史与后续计划
 
 已发布版本、当前能力边界以及 ORCA、MPC、传感器、电量返航、扩编和实机迁移计划见 [`ROADMAP.md`](ROADMAP.md)。
 
-## 恢复
+## 构建与启动
 
 将仓库克隆到容器的 `/home/devuser`，安装 README/文档中记录的系统依赖，然后在工作空间中构建：
 
@@ -36,6 +40,29 @@ catkin build logistics_gazebo_sim
 source /home/devuser/catkin_ws/devel/setup.bash
 roslaunch logistics_gazebo_sim operator_station.launch
 ```
+
+## 测试
+
+```bash
+cd /home/devuser/catkin_ws/src/logistics_gazebo_sim
+source /opt/ros/noetic/setup.bash
+source /home/devuser/catkin_ws/devel/setup.bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover -s test -q
+```
+
+当前统一基线应通过 61 项 Python 回归测试，并能成功执行 `catkin build logistics_gazebo_sim`。
+
+## 恢复历史版本
+
+历史版本由不可移动的 Git 标签保存。建议使用独立 worktree，避免覆盖当前 `main`：
+
+```bash
+cd /home/devuser
+git fetch --tags
+git worktree add /home/devuser/version-v0.4.1 v0.4.1
+```
+
+统一前的双包目录可从对应历史标签恢复。不要为了查看旧版本对 `main` 执行 `git reset --hard`。
 
 ## 版本策略
 
