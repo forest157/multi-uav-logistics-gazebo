@@ -4,6 +4,8 @@
 
 本文记录原 ROS/OMPL/TOPPRA 实验线的设计与验证过程。该实验线现已并入唯一主包 `~/catkin_ws/src/logistics_gazebo_sim`；统一前的双包结构仅保留在 Git 历史标签中。
 
+当前发布验收记录：[`v0.4.2 ORCA 受限闭环接管`](v042_orca_limited_control/README.md)。
+
 ## 算法链路
 
 该实验线验证并引入了以下算法链路：

@@ -31,7 +31,7 @@ class LocalAvoidanceTest(unittest.TestCase):
         self.assertAlmostEqual(result["commands"][0]["velocity"][1],
                                -result["commands"][1]["velocity"][1],places=3)
         self.assertGreaterEqual(result["predicted_minimum_separation_m"],2.95)
-        self.assertTrue(result["shadow_mode"])
+        self.assertFalse(result["shadow_mode"]);self.assertTrue(result["requires_external_safety_gate"])
     def test_orca_respects_buffered_obstacle_clearance(self):
         obstacle={"id":"near_bird","position":[2,2.8,8],"velocity":[0,0,0],"radius":0.8,"height":1.0}
         result=Orca3DPlanner().plan([[[0,0,0,8],[4,8,0,8]]],[obstacle],

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """RViz markers for vehicles, targets, trails, route and 3D obstacles."""
+import json
 import rospy
 from geometry_msgs.msg import Point, PoseStamped
 from visualization_msgs.msg import Marker, MarkerArray
+from std_msgs.msg import String
 from logistics_gazebo_sim.scenes import SCALE, SCENES, metric_xy
 from logistics_gazebo_sim.fleet_config import indexed_palette, line_spawn_offsets, validate_vehicle_count
 
@@ -16,9 +18,12 @@ class Visualizer:
         self.spawns=[(sx+dx,sy+dy) for dx,dy in line_spawn_offsets(self.count,spacing)]
         self.colors=indexed_palette(self.count)
         self.poses, self.targets, self.trails = [None]*self.count, [None]*self.count, [[] for _ in range(self.count)]
+        self.orca_velocities=[None]*self.count;self.predicted_paths=[[] for _ in range(self.count)]
         for i in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
             rospy.Subscriber("/uav{}/target_pose".format(i),PoseStamped,self.target_cb,callback_args=i,queue_size=1)
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1)
+        rospy.Subscriber("/fleet/nominal_prediction",String,self.prediction_cb,queue_size=1)
         self.pub=rospy.Publisher("/fleet/markers",MarkerArray,queue_size=2,latch=True)
     def pose_cb(self,msg,i):
         p=Point(msg.pose.position.x+self.spawns[i][0],msg.pose.position.y+self.spawns[i][1],msg.pose.position.z)
@@ -26,6 +31,18 @@ class Visualizer:
         if not self.trails[i] or ((p.x-self.trails[i][-1].x)**2+(p.y-self.trails[i][-1].y)**2+(p.z-self.trails[i][-1].z)**2)>0.04:self.trails[i].append(p)
         self.trails[i]=self.trails[i][-1000:]
     def target_cb(self,msg,i):self.targets[i]=Point(msg.pose.position.x+self.spawns[i][0],msg.pose.position.y+self.spawns[i][1],msg.pose.position.z)
+    def state_cb(self,msg):
+        try:
+            execution=json.loads(msg.data).get("avoidance_execution") or {}
+            values=execution.get("velocities") if execution.get("action")=="ORCA" else None
+            self.orca_velocities=values if isinstance(values,list) and len(values)==self.count else [None]*self.count
+        except (TypeError,ValueError):self.orca_velocities=[None]*self.count
+    def prediction_cb(self,msg):
+        try:
+            paths=json.loads(msg.data).get("paths") or []
+            if len(paths)!=self.count:raise ValueError("prediction count mismatch")
+            self.predicted_paths=[[Point(float(row[1])+self.spawns[i][0],float(row[2])+self.spawns[i][1],float(row[3])) for row in path] for i,path in enumerate(paths)]
+        except (TypeError,ValueError,IndexError):self.predicted_paths=[[] for _ in range(self.count)]
     def marker(self,mid,kind,ns="fleet"):
         m=Marker();m.header.frame_id="world";m.header.stamp=rospy.Time.now();m.ns=ns;m.id=mid;m.type=kind;m.action=Marker.ADD;m.pose.orientation.w=1.0;return m
     def color(self,m,c,a=1.0):m.color.r,m.color.g,m.color.b,m.color.a=c[0],c[1],c[2],a
@@ -53,6 +70,11 @@ class Visualizer:
                     m=self.marker(i,Marker.SPHERE,"vehicles");m.pose.position=p;m.scale.x=m.scale.y=0.8;m.scale.z=0.3;self.color(m,self.colors[i]);arr.markers.append(m)
                     label=self.marker(10+i,Marker.TEXT_VIEW_FACING,"labels");label.pose.position=Point(p.x,p.y,p.z+1.0);label.scale.z=0.7;label.text="UAV{}".format(i);self.color(label,self.colors[i]);arr.markers.append(label)
                     trail=self.marker(20+i,Marker.LINE_STRIP,"trails");trail.scale.x=0.12;trail.points=self.trails[i];self.color(trail,self.colors[i]);arr.markers.append(trail)
+                    if self.orca_velocities[i] is not None:
+                        arrow=self.marker(40+i,Marker.ARROW,"orca_velocity");velocity=self.orca_velocities[i]
+                        arrow.points=[p,Point(p.x+velocity[0],p.y+velocity[1],p.z+velocity[2])];arrow.scale.x,arrow.scale.y,arrow.scale.z=0.10,0.20,0.20;self.color(arrow,(1.0,0.55,0.05));arr.markers.append(arrow)
+                    if self.predicted_paths[i]:
+                        prediction=self.marker(50+i,Marker.LINE_STRIP,"nominal_prediction");prediction.scale.x=0.07;prediction.points=self.predicted_paths[i];self.color(prediction,self.colors[i],0.35);arr.markers.append(prediction)
                 if self.targets[i]:
                     t=self.marker(30+i,Marker.SPHERE,"targets");t.pose.position=self.targets[i];t.scale.x=t.scale.y=t.scale.z=0.35;self.color(t,self.colors[i],0.45);arr.markers.append(t)
             self.pub.publish(arr);rate.sleep()

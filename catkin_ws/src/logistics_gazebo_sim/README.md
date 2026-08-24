@@ -34,7 +34,7 @@ OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线�
 
 ## 验证结果
 
-当前统一基线通过 61 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已完成 Gazebo 三机影子模式验证，但尚未直接接管 PX4。
+v0.4.2 统一基线通过 65 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已完成 Gazebo 三机受限闭环验证，并保留整队偏移与影子模式作为可切换方案。
 
 七个场景均完成 OMPL 3D + TOPPRA 规划。典型场景 0：
 
@@ -45,6 +45,10 @@ OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线�
 - 任务播放器运行时目标高度验证覆盖同一范围。
 
 场景 1 在 37 m 已高于主要障碍物，因此最优路径保持恒高；其余复杂低空场景会按需要爬升或侧向绕障。
+
+## v0.4.2 闭环边界
+
+ORCA 仅在 WARNING 且命令新鲜、车辆集合完整、动态净空、静态场景、地图边界、高度与机间距全部复核通过时接管。CRITICAL、超时、无解或约束失败均同步悬停；上位机可选择“整队偏移（稳定闭环）”“3D ORCA（影子模式）”或“3D ORCA（受限接管）”。
 
 ## 启动
 

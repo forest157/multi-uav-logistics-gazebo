@@ -251,9 +251,9 @@ class Orca3DPlanner(LocalAvoidancePlanner):
             "predicted_minimum_obstacle_clearance_m":(None if not checked else round(minimum_obstacle,4)),
             "static_validation":static,
             "constraints_satisfied":bool(constraints_satisfied),
-            "reason":("3D ORCA velocity solution generated in shadow mode" if constraints_satisfied
+            "reason":("3D ORCA velocity solution generated for external safety gating" if constraints_satisfied
                       else "3D ORCA command failed dynamic, static or fleet constraints; hold required"),
-            "shadow_mode":True,"rejection_summary":rejections}
+            "shadow_mode":False,"requires_external_safety_gate":True,"rejection_summary":rejections}
 
 
 _PLANNERS={value.name:value for value in (CollectiveOffsetPlanner,Orca3DPlanner)}
