@@ -4,6 +4,7 @@ import numpy as np
 
 from logistics_gazebo_sim.dynamic_obstacles import (
     DynamicObstacleError, interpolate_timed_path, plan_collective_avoidance,
+    validate_static_paths,
     validate_obstacle)
 
 
@@ -32,12 +33,14 @@ class OrcaCommandGate:
             raise DynamicObstacleError("ORCA smoothing must be in (0,1]")
         self.reset()
     def reset(self):
-        self.previous=[np.zeros(3,dtype=float) for _ in range(self.vehicle_count)]
+        self.previous=[None for _ in range(self.vehicle_count)]
     def condition(self, plan, now, dt):
         if not isinstance(plan,dict) or not plan.get("viable"):
             raise DynamicObstacleError("ORCA plan is not viable")
         if plan.get("contract_version")!="orca_velocity_v1" or plan.get("algorithm")!="orca3d" or plan.get("command_type")!="per_vehicle_velocity":
             raise DynamicObstacleError("unexpected ORCA command contract")
+        if not plan.get("constraints_satisfied") or not (plan.get("static_validation") or {}).get("feasible"):
+            raise DynamicObstacleError("ORCA command lacks independent safety validation")
         stamp=float(plan.get("stamp",-1.0))
         age=float(now)-stamp
         validity=min(self.timeout,float(plan.get("valid_for_s",self.timeout)))
@@ -52,14 +55,31 @@ class OrcaCommandGate:
             raise DynamicObstacleError("ORCA command vehicle ids mismatch")
         step=max(1e-3,float(dt));result=[]
         for index in range(self.vehicle_count):
-            desired=_clamp(_vector(by_id["uav{}".format(index)].get("velocity"),"ORCA velocity"),self.max_speed)
+            item=by_id["uav{}".format(index)]
+            desired=_clamp(_vector(item.get("velocity"),"ORCA velocity"),self.max_speed)
             desired[2]=max(-self.max_climb_rate,min(self.max_climb_rate,desired[2]))
+            if self.previous[index] is None:
+                preferred=_clamp(_vector(item.get("preferred_velocity"),"ORCA preferred velocity"),self.max_speed)
+                preferred[2]=max(-self.max_climb_rate,min(self.max_climb_rate,preferred[2]))
+                self.previous[index]=preferred
             delta=_clamp(desired-self.previous[index],self.max_acceleration*step)
             limited=self.previous[index]+delta
             filtered=self.previous[index]+self.smoothing*(limited-self.previous[index])
             self.previous[index]=filtered
             result.append(tuple(float(value) for value in filtered))
         return result
+
+
+def orca_position_targets(poses, velocities, horizon):
+    """Convert conditioned ENU velocities into short position setpoints."""
+    if len(poses)!=len(velocities) or not poses:
+        raise DynamicObstacleError("ORCA pose and velocity counts must match")
+    seconds=float(horizon)
+    if not np.isfinite(seconds) or seconds<=0.0:
+        raise DynamicObstacleError("ORCA position horizon must be positive")
+    return [tuple(float(value) for value in (_vector(pose,"ORCA pose")+
+            seconds*_vector(velocity,"conditioned ORCA velocity")))
+            for pose,velocity in zip(poses,velocities)]
 
 
 def _path_state(path, lookahead):
@@ -209,21 +229,30 @@ class Orca3DPlanner(LocalAvoidancePlanner):
                     clearance=float(np.linalg.norm(future-obstacle_future))-(
                         radius+obstacle["radius"]+safety_buffer+required_clearance)
                     minimum_obstacle=min(minimum_obstacle,clearance)
+        scene_id=options.get("scene_id")
+        predicted_paths=[]
+        for position,velocity in zip(positions,velocities):
+            predicted_paths.append([[float(seconds)]+list(position+velocity*seconds)
+                                    for seconds in sample_times])
+        static=(validate_static_paths(scene_id,predicted_paths) if scene_id is not None
+                else {"feasible":True,"error_code":None,"message":"static validation disabled"})
         pair_safe=(count<2 or minimum_pair>=required-0.05)
         obstacle_safe=(not checked or minimum_obstacle>=-0.05)
-        constraints_satisfied=pair_safe and obstacle_safe
+        constraints_satisfied=pair_safe and obstacle_safe and static["feasible"]
         rejections={}
         if not pair_safe:rejections["VEHICLE_SEPARATION"]=1
         if not obstacle_safe:rejections["DYNAMIC_CLEARANCE"]=1
+        if not static["feasible"]:rejections[static.get("error_code") or "STATIC_CONSTRAINT"]=1
         return {"viable":bool(constraints_satisfied),"algorithm":self.name,
             "command_type":self.command_type,"vehicle_count":count,
             "commands":commands,"selected_offset":None,
             "minimum_clearance_m":None,"candidates":[],
             "predicted_minimum_separation_m":(None if count<2 else round(minimum_pair,4)),
             "predicted_minimum_obstacle_clearance_m":(None if not checked else round(minimum_obstacle,4)),
+            "static_validation":static,
             "constraints_satisfied":bool(constraints_satisfied),
             "reason":("3D ORCA velocity solution generated in shadow mode" if constraints_satisfied
-                      else "3D ORCA could not satisfy fleet separation; hold required"),
+                      else "3D ORCA command failed dynamic, static or fleet constraints; hold required"),
             "shadow_mode":True,"rejection_summary":rejections}
 
 

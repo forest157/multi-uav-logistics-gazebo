@@ -6,7 +6,8 @@ from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger, TriggerResponse
-from logistics_gazebo_sim.dynamic_obstacles import DynamicSafetyResponse, AvoidanceExecution
+from logistics_gazebo_sim.dynamic_obstacles import DynamicSafetyResponse, AvoidanceExecution, DynamicObstacleError
+from logistics_gazebo_sim.local_avoidance import OrcaCommandGate, orca_position_targets
 
 def smoothstep(v):
     v=max(0.0,min(1.0,v));return v*v*(3.0-2.0*v)
@@ -51,6 +52,17 @@ class MissionPlayer:
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self._pose_cb,callback_args=i,queue_size=1)
         self.dynamic_safety_enabled=bool(rospy.get_param("~dynamic_safety_enabled",False))
         self.dynamic_avoidance_enabled=bool(rospy.get_param("~dynamic_avoidance_execution",False))
+        self.local_avoidance_algorithm=str(rospy.get_param("~local_avoidance_algorithm","collective_offset"))
+        self.orca_control_mode=str(rospy.get_param("~orca_control_mode","shadow")).lower()
+        self.orca_position_horizon=float(rospy.get_param("~orca_position_horizon_s",0.6))
+        self.orca_gate=OrcaCommandGate(self.count,
+            max_speed=float(rospy.get_param("~orca_max_speed_mps",2.0)),
+            max_climb_rate=float(rospy.get_param("~orca_max_climb_rate_mps",0.8)),
+            max_acceleration=float(rospy.get_param("~orca_max_acceleration_mps2",1.0)),
+            smoothing=float(rospy.get_param("~orca_command_smoothing",0.35)),
+            timeout=float(rospy.get_param("~orca_command_timeout_s",0.6)))
+        self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None
+        self.last_orca_update=None
         self.avoidance_execution=AvoidanceExecution(
             confirmation_s=float(rospy.get_param("~avoidance_confirmation_s",0.6)),
             apply_s=float(rospy.get_param("~avoidance_apply_s",4.0)),
@@ -76,7 +88,29 @@ class MissionPlayer:
         except (TypeError,ValueError):payload={};level="STALE"
         command=self.dynamic_response.update(level,rospy.get_time())
         self.dynamic_action,self.dynamic_scale,self.dynamic_level=command["action"],command["speed_scale"],command["risk_level"]
-        if self.dynamic_avoidance_enabled:
+        if self.dynamic_avoidance_enabled and self.local_avoidance_algorithm=="orca3d":
+            avoidance=payload.get("avoidance") or {};now=rospy.get_time()
+            self.avoidance_command={"state":"IDLE","action":"NONE","algorithm":"orca3d",
+                                    "failure":None,"velocities":None}
+            if level=="WARNING" and self.orca_control_mode=="limited":
+                try:
+                    dt=0.2 if self.last_orca_update is None else max(0.02,now-self.last_orca_update)
+                    self.orca_velocities=self.orca_gate.condition(avoidance,now,dt)
+                    self.last_orca_update=now;self.orca_plan_stamp=float(avoidance["stamp"]);self.orca_failure=None
+                    self.dynamic_action,self.dynamic_scale="ORCA",0.35
+                    self.avoidance_command.update({"state":"ACTIVE","action":"ORCA",
+                        "velocities":self.orca_velocities,"plan_stamp":self.orca_plan_stamp})
+                except (DynamicObstacleError,TypeError,ValueError) as error:
+                    self.orca_velocities=None;self.orca_failure=str(error)
+                    self.dynamic_action,self.dynamic_scale="HOLD",0.0
+                    self.avoidance_command.update({"state":"HOLD","action":"HOLD","failure":self.orca_failure})
+            elif level=="CRITICAL":
+                self.orca_velocities=None;self.orca_failure="critical risk requires synchronized hold"
+                self.dynamic_action,self.dynamic_scale="HOLD",0.0
+                self.avoidance_command.update({"state":"HOLD","action":"HOLD","failure":self.orca_failure})
+            else:
+                self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.orca_gate.reset()
+        elif self.dynamic_avoidance_enabled:
             self.avoidance_command=self.avoidance_execution.update(level,payload.get("avoidance"),rospy.get_time())
             if self.avoidance_command["action"]=="AVOID":self.dynamic_action,self.dynamic_scale="AVOID",0.35
             elif self.avoidance_command["action"]=="HOLD":self.dynamic_action,self.dynamic_scale="HOLD",0.0
@@ -96,7 +130,7 @@ class MissionPlayer:
         self.emergency_land=True;self.enabled,self.paused=False,False;self.takeoff_pub.publish(False);self.complete_pub.publish(True);return TriggerResponse(True,"emergency landing requested")
     def _reset(self,_):
         self.enabled=False;self.paused=False;self.start_time=None;self.pause_time=None;self.emergency_land=False;self.elapsed=0.0;self.last_stage=None;self.landing_ready_since=None
-        self.dynamic_response.reset();self.avoidance_execution.reset();self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.last_clock=rospy.Time.now()
+        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.last_clock=rospy.Time.now()
         self.complete_pub.publish(False);self.takeoff_pub.publish(False)
         return TriggerResponse(True,"mission reset; takeoff authorization revoked")
 
@@ -167,10 +201,17 @@ class MissionPlayer:
                 {"stamp":now.to_sec(),"horizon_s":self.prediction_horizon,
                  "paths":self.prediction_paths()},separators=(",",":")))
 
-            if self.dynamic_avoidance_enabled:
+            if self.dynamic_avoidance_enabled and self.local_avoidance_algorithm!="orca3d":
                 self.avoidance_command=self.avoidance_execution.command(now.to_sec())
                 if self.avoidance_command["action"]=="AVOID":
                     ox,oy,oz=self.avoidance_command["offset"];targets=[(x+ox,y+oy,z+oz) for x,y,z in targets]
+            if self.dynamic_action=="ORCA" and self.orca_velocities is not None:
+                if self.orca_plan_stamp is None or now.to_sec()-self.orca_plan_stamp>self.orca_gate.timeout:
+                    self.dynamic_action,self.dynamic_scale="HOLD",0.0;self.orca_failure="ORCA command expired during execution"
+                    self.avoidance_command={"state":"HOLD","action":"HOLD","algorithm":"orca3d","failure":self.orca_failure,"velocities":None}
+                    if self.dynamic_hold_targets is None and all(p is not None for p in self.current_poses):self.dynamic_hold_targets=list(self.current_poses)
+                elif all(p is not None for p in self.current_poses):
+                    targets=orca_position_targets(self.current_poses,self.orca_velocities,self.orca_position_horizon)
             if self.dynamic_action=="HOLD" and self.dynamic_hold_targets is not None:targets=self.dynamic_hold_targets
             near_ground=self.start_time is not None and self.elapsed>=self.descent_end and max(self.altitudes)<=0.30
             if near_ground:
@@ -183,6 +224,7 @@ class MissionPlayer:
             elif self.paused:state="PAUSED"
             elif self.dynamic_action=="HOLD" and self.start_time:state="DYNAMIC_HOLD"
             elif self.dynamic_action=="AVOID" and self.start_time:state="DYNAMIC_AVOID"
+            elif self.dynamic_action=="ORCA" and self.start_time:state="DYNAMIC_ORCA"
             elif self.dynamic_action=="SLOW" and self.start_time:state="DYNAMIC_SLOW"
             elif self.start_time:state="RUNNING"
             else:state="READY" if self.all_ready() else "INITIALIZING"

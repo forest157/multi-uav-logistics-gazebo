@@ -13,6 +13,9 @@
   <arg name="dynamic_avoidance_execution" default="false"/>
   <arg name="vehicle_count" default="3"/>
   <arg name="local_avoidance_algorithm" default="collective_offset"/>
+  <arg name="orca_control_mode" default="shadow"/>
+  <arg name="orca_command_timeout_s" default="0.6"/>
+  <arg name="orca_position_horizon_s" default="0.6"/>
   <arg name="dynamic_obstacle_config" default="$(find logistics_gazebo_sim)/config/dynamic_obstacles_crossing.yaml"/>
   <include file="$(find logistics_gazebo_sim)/launch/three_uav_sitl.launch">
     <arg name="scene_id" value="$(arg scene_id)"/>
@@ -45,6 +48,10 @@
     <param name="auto_start" value="$(arg auto_start)"/>
     <param name="dynamic_safety_enabled" value="$(arg dynamic_obstacles)"/>
     <param name="dynamic_avoidance_execution" value="$(arg dynamic_avoidance_execution)"/>
+    <param name="local_avoidance_algorithm" value="$(arg local_avoidance_algorithm)"/>
+    <param name="orca_control_mode" value="$(arg orca_control_mode)"/>
+    <param name="orca_command_timeout_s" value="$(arg orca_command_timeout_s)"/>
+    <param name="orca_position_horizon_s" value="$(arg orca_position_horizon_s)"/>
     <param name="prediction_horizon_s" value="8.0"/>
     <param name="avoidance_confirmation_s" value="0.6"/>
     <param name="avoidance_apply_s" value="4.0"/>

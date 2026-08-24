@@ -8,10 +8,13 @@ class V041ConfigurationTest(unittest.TestCase):
         root=tree.getroot();args={node.attrib["name"]:node.attrib.get("default") for node in root.findall("arg")}
         self.assertEqual(args["vehicle_count"],"3")
         self.assertEqual(args["local_avoidance_algorithm"],"collective_offset")
+        self.assertEqual(args["orca_control_mode"],"shadow")
+        self.assertEqual(args["orca_command_timeout_s"],"0.6")
         xml=ET.tostring(root,encoding="unicode")
         self.assertGreaterEqual(xml.count('value="$(arg vehicle_count)"'),5)
         self.assertIn('value="$(arg local_avoidance_algorithm)"',xml)
         self.assertIn('name="expected_vehicle_count" value="$(arg vehicle_count)"',xml)
+        self.assertGreaterEqual(xml.count("orca_control_mode"),2)
     def test_python_and_ros_package_versions_match(self):
         package=ET.parse(os.path.join(ROOT,"package.xml")).getroot().findtext("version")
         setup=Path(ROOT,"setup.py").read_text(encoding="utf-8")

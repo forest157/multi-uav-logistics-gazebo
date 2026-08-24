@@ -56,6 +56,7 @@ class OperatorPlugin(Plugin):
         self.formation.addItem("纵向一字队形（窄通道）","column");self.formation.addItem("垂直错层队形","vertical");self.formation.addItem("三维楔形队形","wedge3d");self.formation.addItem("三维螺旋队形","helix")
         self.dynamic_enabled=QCheckBox("启用交叉移动障碍物与在线风险预测");self.dynamic_enabled.setChecked(True)
         form.addRow("动态避障实验",self.dynamic_enabled)
+        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队偏移（稳定闭环）",("collective_offset","shadow",True));self.avoidance_mode.addItem("3D ORCA（影子模式）",("orca3d","shadow",False));self.avoidance_mode.addItem("3D ORCA（受限接管）",("orca3d","limited",True));form.addRow("局部避障模式",self.avoidance_mode)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
@@ -86,7 +87,7 @@ class OperatorPlugin(Plugin):
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
         self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True);rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
-        self.formation.currentIndexChanged.connect(self.parameters_changed)
+        self.formation.currentIndexChanged.connect(self.parameters_changed);self.avoidance_mode.currentIndexChanged.connect(self.parameters_changed)
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1)
         rospy.Subscriber("/fleet/dynamic_risk",String,self.dynamic_risk_cb,queue_size=1)
         self.update_defaults()
@@ -98,7 +99,7 @@ class OperatorPlugin(Plugin):
         return (int(self.scene.currentData()),round(self.start_x.value(),3),
                 round(self.start_y.value(),3),round(self.goal_x.value(),3),
                 round(self.goal_y.value(),3),round(self.altitude.value(),3),
-                str(self.formation.currentData()))
+                str(self.formation.currentData()),str(self.avoidance_mode.currentData()))
     def parameters_changed(self,_value=None):
         self.publish_preview();self.schedule_analysis()
     def schedule_analysis(self):
@@ -287,7 +288,8 @@ class OperatorPlugin(Plugin):
         if preflight:
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
-        self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
+        algorithm,orca_mode,execution=self.avoidance_mode.currentData()
+        self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
         px4_root=os.path.expanduser("~/PX4_Firmware")
@@ -370,7 +372,7 @@ class OperatorPlugin(Plugin):
             algorithm=avoidance.get("algorithm") or value.get("local_avoidance_algorithm")
             if algorithm:text+=" | 算法 {}".format(algorithm)
             if avoidance.get("viable") and avoidance.get("command_type")=="per_vehicle_velocity":
-                text+=" | ORCA速度建议 {} 架（影子模式）".format(len(avoidance.get("commands") or []))
+                text+=" | ORCA速度建议 {} 架（{}）".format(len(avoidance.get("commands") or []),"受限接管" if self.avoidance_mode.currentData()[1]=="limited" else "影子模式")
             elif avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
             elif level in ("WARNING","CRITICAL"):
                 summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}

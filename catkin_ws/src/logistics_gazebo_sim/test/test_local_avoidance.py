@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from logistics_gazebo_sim.local_avoidance import (
-    CollectiveOffsetPlanner, Orca3DPlanner, OrcaCommandGate, available_local_planners,
+    CollectiveOffsetPlanner, Orca3DPlanner, OrcaCommandGate, orca_position_targets, available_local_planners,
     create_local_planner)
 from logistics_gazebo_sim.dynamic_obstacles import DynamicObstacleError
 
@@ -49,21 +49,31 @@ class LocalAvoidanceTest(unittest.TestCase):
             max_acceleration=1.0,smoothing=0.5,timeout=0.6)
         plan={"viable":True,"algorithm":"orca3d",
             "command_type":"per_vehicle_velocity","contract_version":"orca_velocity_v1","valid_for_s":0.6,"stamp":10.0,
-            "commands":[{"vehicle_id":"uav0","velocity":[4,0,2]},
-                        {"vehicle_id":"uav1","velocity":[0,-4,-2]}]}
+            "constraints_satisfied":True,"static_validation":{"feasible":True},"commands":[{"vehicle_id":"uav0","velocity":[4,0,2],"preferred_velocity":[1,0,0]},
+                        {"vehicle_id":"uav1","velocity":[0,-4,-2],"preferred_velocity":[0,-1,0]}]}
         values=gate.condition(plan,10.2,0.2)
         self.assertEqual(len(values),2)
-        self.assertLessEqual(np.linalg.norm(values[0]),0.1001)
-        self.assertLessEqual(abs(values[0][2]),0.0501)
+        self.assertLessEqual(np.linalg.norm(np.asarray(values[0])-np.asarray([1.0,0.0,0.0])),0.1001)
+        self.assertLessEqual(abs(values[0][2]),0.1001)
 
     def test_orca_command_gate_rejects_stale_or_incomplete_plan(self):
         gate=OrcaCommandGate(2,timeout=0.5)
         plan={"viable":True,"algorithm":"orca3d",
             "command_type":"per_vehicle_velocity","contract_version":"orca_velocity_v1","valid_for_s":0.6,"stamp":1.0,
-            "commands":[{"vehicle_id":"uav0","velocity":[0,0,0]}]}
+            "constraints_satisfied":True,"static_validation":{"feasible":True},"commands":[{"vehicle_id":"uav0","velocity":[0,0,0],"preferred_velocity":[0,0,0]}]}
         with self.assertRaises(DynamicObstacleError):gate.condition(plan,1.1,0.1)
-        plan["commands"].append({"vehicle_id":"uav1","velocity":[0,0,0]})
+        plan["commands"].append({"vehicle_id":"uav1","velocity":[0,0,0],"preferred_velocity":[0,0,0]})
         with self.assertRaises(DynamicObstacleError):gate.condition(plan,2.0,0.1)
+
+    def test_orca_static_validation_rejects_boundary_escape(self):
+        result=Orca3DPlanner().plan([[[0,45,0,8],[4,50,0,8]]],[],scene_id=0,max_speed=3.0)
+        self.assertFalse(result["viable"])
+        self.assertIn("E_BOUNDARY",result["rejection_summary"])
+
+    def test_orca_velocity_to_position_target(self):
+        targets=orca_position_targets([(1,2,3),(0,0,4)],[(2,0,-1),(0,1,0)],0.5)
+        self.assertEqual(targets,[(2.0,2.0,2.5),(0.0,0.5,4.0)])
+        with self.assertRaises(DynamicObstacleError):orca_position_targets([(0,0,0)],[],0.5)
 
     def test_collective_adapter_preserves_legacy_contract(self):
         result=CollectiveOffsetPlanner().plan(self.paths(),[],candidate_offsets=[[0,0,0]])
