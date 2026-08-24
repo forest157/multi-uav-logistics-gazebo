@@ -86,7 +86,7 @@ def _failure(code, message, point, available, required, obstacle=None,
 
 def analyze_path(scene_id, path, formation="triangle", vehicle_count=3,
                  spacing=3.0, sample_step=0.5, vehicle_radius=1.2,
-                 vertical_radius=0.6):
+                 vertical_radius=0.6, center_xy_limit=CENTER_XY_LIMIT):
     """Check a centre path against world, obstacle and formation envelopes."""
     if scene_id not in SCENES:
         return _failure("E_SCENE", "场景编号无效", (0, 0, 0), {}, {})
@@ -111,7 +111,7 @@ def analyze_path(scene_id, path, formation="triangle", vehicle_count=3,
         ceiling = WORLD_Z_MAX - z
         minimum_floor = min(minimum_floor, floor)
         minimum_ceiling = min(minimum_ceiling, ceiling)
-        if max(abs(x),abs(y)) > CENTER_XY_LIMIT:
+        if max(abs(x),abs(y)) > float(center_xy_limit):
             return _failure(
                 "E_BOUNDARY", "编队中心超出规划安全边界", point,
                 {"horizontal_m": boundary_xy, "below_m": floor,

@@ -279,7 +279,7 @@ def validate_static_paths(scene_id, paths):
     reports=[]
     for index,path in enumerate(paths):
         xyz=np.asarray(path,dtype=float)[:,1:]
-        report=analyze_path(int(scene_id),xyz,formation="triangle",vehicle_count=1,spacing=3.0)
+        report=analyze_path(int(scene_id),xyz,formation="triangle",vehicle_count=1,spacing=3.0,center_xy_limit=50.0)
         report["vehicle_id"]="uav{}".format(index);reports.append(report)
     failed=next((value for value in reports if not value["feasible"]),None)
     return {"feasible":failed is None,"error_code":None if failed is None else failed["error_code"],

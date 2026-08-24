@@ -5,7 +5,7 @@ import numpy as np
 
 from logistics_gazebo_sim.dynamic_obstacles import (
     DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_fleet_separation, assess_timed_path, interpolate_timed_path,
-    obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path)
+    obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path, validate_static_paths)
 
 
 class DynamicObstacleTest(unittest.TestCase):
@@ -89,6 +89,11 @@ class DynamicObstacleTest(unittest.TestCase):
         result=plan_collective_avoidance(self.fleet_paths(),[obstacle],candidate_offsets=[[0.0,0.0,0.0],[0.0,0.0,3.0]],horizon=10.0)
         self.assertFalse(result["viable"]);self.assertIsNone(result["selected_offset"])
         self.assertIn("no collective offset",result["reason"])
+
+    def test_individual_vehicle_may_use_space_outside_formation_center_limit(self):
+        report=validate_static_paths(0,[[[0.0,47.5,45.0,8.0],[2.0,48.0,45.0,8.0]]])
+        self.assertTrue(report["feasible"])
+
 
     def test_static_boundary_rejects_collective_candidate(self):
         paths=[[[0.0,44.0,0.0,8.0],[10.0,45.0,0.0,8.0]]]
