@@ -11,6 +11,7 @@ from logistics_gazebo_sim.local_avoidance import create_local_planner
 class Planner:
     def __init__(self):
         self.algorithm=str(rospy.get_param("~algorithm","collective_offset"))
+        self.planners={}
         self.pub=rospy.Publisher("/fleet/avoidance_plan",String,queue_size=1)
         rospy.Subscriber("/fleet/avoidance_request",String,self.callback,queue_size=1)
 
@@ -20,10 +21,12 @@ class Planner:
             payload=json.loads(message.data)
             options=dict(payload.get("options",{}))
             algorithm=options.pop("algorithm",self.algorithm)
-            avoidance=create_local_planner(algorithm).plan(
+            if algorithm not in self.planners:self.planners[algorithm]=create_local_planner(algorithm)
+            avoidance=self.planners[algorithm].plan(
                 payload["paths"],payload["obstacles"],**options)
             if algorithm=="distributed_mpc" and not avoidance.get("viable"):
-                fallback=create_local_planner("orca3d").plan(payload["paths"],payload["obstacles"],**options)
+                if "orca3d" not in self.planners:self.planners["orca3d"]=create_local_planner("orca3d")
+                fallback=self.planners["orca3d"].plan(payload["paths"],payload["obstacles"],**options)
                 avoidance["fallback_algorithm"]="orca3d";avoidance["fallback"]=fallback
                 avoidance["reason"]+="; ORCA fallback {}".format("available" if fallback.get("viable") else "unavailable")
             avoidance["contract_version"]={"per_vehicle_velocity":"orca_velocity_v1","per_vehicle_trajectory":"mpc_trajectory_v1"}.get(avoidance.get("command_type"),"collective_offset_v1")

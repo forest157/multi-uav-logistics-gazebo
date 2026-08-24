@@ -86,6 +86,14 @@ class LocalAvoidanceTest(unittest.TestCase):
         self.assertTrue(result["fleet_separation"]["safe"])
         self.assertLess(result["solve_time_ms"]["total"],1500.0)
 
+    def test_distributed_mpc_warm_start_reuses_safe_solution(self):
+        planner=DistributedMpcPlanner();obstacle={"id":"bird","position":[5,0,8],"velocity":[0,0,0],"radius":0.5,"height":0.8}
+        first=planner.plan(self.paths(3),[obstacle],mpc_steps=6,mpc_dt=0.5,mpc_max_iterations=55)
+        second=planner.plan(self.paths(3),[obstacle],mpc_steps=6,mpc_dt=0.5,mpc_max_iterations=55)
+        self.assertTrue(first["viable"]);self.assertTrue(second["viable"])
+        self.assertEqual(first["warm_started_vehicle_count"],0);self.assertGreater(second["warm_started_vehicle_count"],0)
+
+
     def test_distributed_mpc_timeout_is_contained(self):
         result=DistributedMpcPlanner().plan(self.paths(3),[],mpc_vehicle_timeout_s=0.0001)
         self.assertFalse(result["viable"]);self.assertTrue(result["solver_isolated"])
