@@ -169,6 +169,7 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
         max_vertical_acc=float(options.get("max_vertical_acceleration",0.6));max_climb=float(options.get("max_climb_rate",0.8))
         separation=float(options.get("minimum_separation",3.0));required_clearance=float(options.get("required_clearance",0.5))
         max_iterations=int(options.get("mpc_max_iterations",45));scene_id=options.get("scene_id")
+        obstacle_margin=float(options.get("mpc_obstacle_margin",0.0));own_obstacle_weight=float(options.get("mpc_obstacle_weight",2400.0));shared_obstacle_weight=float(options.get("mpc_shared_obstacle_weight",1400.0));direction_weight=float(options.get("mpc_direction_weight",800.0))
         if not 1<=count<=32 or not 2<=steps<=20 or min(dt,max_speed,max_acc,max_vertical_acc,max_climb,separation)<=0.0:
             raise DynamicObstacleError("MPC dimensions and limits are invalid")
         checked=[validate_obstacle(value) for value in obstacles]
@@ -204,13 +205,13 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
                 for step_index in range(1,steps+1):
                     seconds=query[step_index];position=positions[step_index]
                     for obstacle in checked:
-                        obstacle_center=obstacle["position"]+obstacle["velocity"]*seconds;safe=1.2+obstacle["radius"]+0.5+required_clearance
+                        obstacle_center=obstacle["position"]+obstacle["velocity"]*seconds;safe=1.2+obstacle["radius"]+0.5+required_clearance+obstacle_margin
                         for source in range(count):
                             formation_delta=references[vehicle][step_index]-references[source][step_index]
-                            center=obstacle_center+formation_delta;gap=float(np.linalg.norm(position-center));weight=1200.0 if source==vehicle else 700.0
+                            center=obstacle_center+formation_delta;gap=float(np.linalg.norm(position-center));weight=own_obstacle_weight if source==vehicle else shared_obstacle_weight
                             cost+=weight*max(0.0,safe-gap)**2
                             if gap<2.0*safe:
-                                lateral=float(np.dot(position-center,avoid_direction));cost+=400.0*max(0.0,safe-lateral)**2
+                                lateral=float(np.dot(position-center,avoid_direction));cost+=direction_weight*max(0.0,safe-lateral)**2
                     for peer in range(count):
                         if peer==vehicle:continue
                         peer_position=references[peer][step_index];gap=float(np.linalg.norm(position-peer_position));cost+=5000.0*max(0.0,separation-gap)**2
