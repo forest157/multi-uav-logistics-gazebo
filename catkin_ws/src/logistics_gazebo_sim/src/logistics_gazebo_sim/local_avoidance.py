@@ -169,7 +169,7 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
         max_vertical_acc=float(options.get("max_vertical_acceleration",0.6));max_climb=float(options.get("max_climb_rate",0.8))
         separation=float(options.get("minimum_separation",3.0));required_clearance=float(options.get("required_clearance",0.5))
         max_iterations=int(options.get("mpc_max_iterations",45));scene_id=options.get("scene_id")
-        obstacle_margin=float(options.get("mpc_obstacle_margin",0.0));own_obstacle_weight=float(options.get("mpc_obstacle_weight",2400.0));shared_obstacle_weight=float(options.get("mpc_shared_obstacle_weight",2400.0));direction_weight=float(options.get("mpc_direction_weight",800.0))
+        obstacle_margin=float(options.get("mpc_obstacle_margin",0.0));own_obstacle_weight=float(options.get("mpc_obstacle_weight",2400.0));shared_obstacle_weight=float(options.get("mpc_shared_obstacle_weight",1400.0));direction_weight=float(options.get("mpc_direction_weight",800.0))
         boundary_margin=float(options.get("mpc_boundary_margin",0.3));boundary_weight=float(options.get("mpc_boundary_weight",3000.0));xy_limit=float(options.get("mpc_xy_limit",48.8));z_lower=float(options.get("mpc_z_lower",3.6));z_upper=float(options.get("mpc_z_upper",44.4))
         if not 1<=count<=32 or not 2<=steps<=20 or min(dt,max_speed,max_acc,max_vertical_acc,max_climb,separation)<=0.0:
             raise DynamicObstacleError("MPC dimensions and limits are invalid")
