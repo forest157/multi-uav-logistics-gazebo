@@ -167,7 +167,7 @@ def mission(scene_id,start=None,goal=None,formation="triangle",altitude=None,veh
          "ready_altitude":max(2.,altitude-1.),
          "initial_formation":initial.tolist(),
          "cruise_formation":cruise.tolist(),"delivery_formation":delivery.tolist(),
-         "formation":{"type":formation,"spacing_m":spacing,"minimum_separation_m":round(float(minimum_separation(cruise)),3),"horizontal_envelope_m":round(margin_xy,3),"below_envelope_m":round(below,3),"above_envelope_m":round(above,3)},
+         "formation":{"type":formation,"spacing_m":spacing,"minimum_separation_m":round(float(minimum_separation(cruise)),3),"tracking_reserve_m":0.3,"horizontal_envelope_m":round(margin_xy,3),"below_envelope_m":round(below,3),"above_envelope_m":round(above,3)},
          "planner":{"method":"ros_ompl_informed_rrtstar_3d",
                     "smoother":"ompl_path_simplifier_bspline",
                     "map_representation":"inflated_3d_obstacle_volume",

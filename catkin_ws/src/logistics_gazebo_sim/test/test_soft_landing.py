@@ -21,6 +21,18 @@ class SoftLandingTest(unittest.TestCase):
         self.assertLessEqual(float(speeds.max()), limit + 1e-5)
         self.assertAlmostEqual(float(heights[-1]), touchdown)
 
+    def test_safe_formation_adds_tracking_reserve_without_centroid_drift(self):
+        raw = [(-3.0, 0.0, 0.0), (0.0, 0.0, 0.0), (3.0, 0.0, 0.0)]
+        safe = mission_player.safe_formation(raw, 3.3)
+        self.assertAlmostEqual(sum(value[0] for value in safe), 0.0)
+        self.assertAlmostEqual(min(
+            np.linalg.norm(np.asarray(safe[i])-np.asarray(safe[j]))
+            for i in range(3) for j in range(i+1, 3)), 3.3)
+
+    def test_safe_formation_rejects_coincident_vehicles(self):
+        with self.assertRaises(ValueError):
+            mission_player.safe_formation([(0.0, 0.0, 0.0)] * 2, 3.3)
+
     def test_existing_slower_descent_is_preserved(self):
         planned = 90.0
         self.assertEqual(
