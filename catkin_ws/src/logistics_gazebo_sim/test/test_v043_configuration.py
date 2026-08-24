@@ -7,11 +7,13 @@ class V043ConfigurationTest(unittest.TestCase):
         tree=ET.parse(os.path.join(ROOT,"launch","three_uav_mission.launch"))
         root=tree.getroot();args={node.attrib["name"]:node.attrib.get("default") for node in root.findall("arg")}
         self.assertEqual(args["vehicle_count"],"3")
+        self.assertEqual(args["spawn_spacing_m"],"3.3")
         self.assertEqual(args["local_avoidance_algorithm"],"collective_offset")
         self.assertEqual(args["orca_control_mode"],"shadow")
         self.assertEqual(args["orca_command_timeout_s"],"0.6")
         xml=ET.tostring(root,encoding="unicode")
         self.assertGreaterEqual(xml.count('value="$(arg vehicle_count)"'),5)
+        self.assertGreaterEqual(xml.count("spawn_spacing_m"),6)
         self.assertIn('value="$(arg local_avoidance_algorithm)"',xml)
         self.assertIn('name="expected_vehicle_count" value="$(arg vehicle_count)"',xml)
         self.assertGreaterEqual(xml.count("orca_control_mode"),2)

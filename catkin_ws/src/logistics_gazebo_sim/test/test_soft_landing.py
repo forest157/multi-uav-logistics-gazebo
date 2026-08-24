@@ -29,6 +29,16 @@ class SoftLandingTest(unittest.TestCase):
             np.linalg.norm(np.asarray(safe[i])-np.asarray(safe[j]))
             for i in range(3) for j in range(i+1, 3)), 3.3)
 
+    def test_spawn_origin_and_local_target_reconstruct_world_formation(self):
+        formation = [(-3.3, 0.0, 0.0), (0.0, 0.0, 0.0), (3.3, 0.0, 0.0)]
+        local = mission_player.local_formation_targets(
+            (12.0, -4.0), 8.0, formation, formation)
+        world = [tuple(local[i][axis]+formation[i][axis] for axis in range(3))
+                 for i in range(3)]
+        expected = [(12.0+rel[0], -4.0+rel[1], 8.0+rel[2])
+                    for rel in formation]
+        self.assertEqual(world, expected)
+
     def test_safe_formation_rejects_coincident_vehicles(self):
         with self.assertRaises(ValueError):
             mission_player.safe_formation([(0.0, 0.0, 0.0)] * 2, 3.3)

@@ -4,6 +4,7 @@
   <arg name="target_z" default="5.0"/>
   <arg name="spawn_x" default="-40.0"/>
   <arg name="spawn_y" default="-40.0"/>
+  <arg name="spawn_spacing_m" default="3.3"/>
   <arg name="gazebo_master_uri" default="http://127.0.0.1:11430"/>
   <env name="GAZEBO_MASTER_URI" value="$(arg gazebo_master_uri)"/>
 
@@ -15,7 +16,7 @@
 
   <group ns="uav0">
     <include file="$(find px4)/launch/single_vehicle_spawn.launch">
-      <arg name="x" value="$(eval float(arg('spawn_x')) - 3.0)"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
+      <arg name="x" value="$(eval float(arg('spawn_x')) - float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
       <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
       <arg name="vehicle" value="iris"/><arg name="mavlink_udp_port" value="14560"/>
       <arg name="mavlink_tcp_port" value="4560"/><arg name="ID" value="0"/>
@@ -47,7 +48,7 @@
 
   <group ns="uav2">
     <include file="$(find px4)/launch/single_vehicle_spawn.launch">
-      <arg name="x" value="$(eval float(arg('spawn_x')) + 3.0)"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
+      <arg name="x" value="$(eval float(arg('spawn_x')) + float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
       <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
       <arg name="vehicle" value="iris"/><arg name="mavlink_udp_port" value="14562"/>
       <arg name="mavlink_tcp_port" value="4562"/><arg name="ID" value="2"/>
