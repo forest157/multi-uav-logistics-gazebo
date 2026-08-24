@@ -39,4 +39,10 @@ class AlgorithmBenchmarkTest(unittest.TestCase):
         metrics=benchmark.trajectory_metrics(predicted,nominal,[])
         self.assertFalse(metrics["kinematically_feasible"])
         self.assertIn("HORIZONTAL_ACCELERATION_LIMIT",metrics["kinematic_rejections"])
+
+    def test_predicted_paths_are_acceleration_limited(self):
+        paths,_=benchmark.scenario(0,profile="crossing",speed=0.8,seed=0)
+        result={"selected_offset":[0,0,6]}
+        metrics=benchmark.trajectory_metrics(benchmark.predicted_paths("collective_offset",result,paths),paths,[])
+        self.assertTrue(metrics["kinematically_feasible"])
 if __name__=="__main__":unittest.main()
