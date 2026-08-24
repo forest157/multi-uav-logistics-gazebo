@@ -7,11 +7,24 @@ from logistics_gazebo_sim.local_avoidance import create_local_planner
 
 ALGORITHMS=("collective_offset","orca3d","distributed_mpc")
 
-def scenario(index,count=3):
-    phase=float(index%10)/9.0;start_x=0.15*index
-    paths=[[[0.0,start_x,(vehicle-(count-1)*0.5)*4.0,8.0],[5.0,start_x+10.0,(vehicle-(count-1)*0.5)*4.0,8.0]] for vehicle in range(count)]
-    obstacle={"id":"bird_{}".format(index),"position":[start_x+4.0+2.0*phase,-6.0+12.0*phase,8.0+0.8*math.sin(index)],"velocity":[0.0,-0.2+0.4*(index%3)/2.0,0.0],"radius":0.5,"height":0.8}
-    return paths,[obstacle]
+PROFILES=("crossing","head_on","diagonal","multi_bird")
+
+def scenario(index,count=3,profile="crossing",speed=1.0,seed=0):
+    if profile not in PROFILES:raise ValueError("unknown scenario profile: {}".format(profile))
+    if speed<=0.0:raise ValueError("obstacle speed must be positive")
+    rng=np.random.default_rng(int(seed)*100003+int(index)*101+len(profile))
+    start_x=0.15*index;center=(count-1)*0.5
+    paths=[[[0.0,start_x,(vehicle-center)*4.0,8.0],[5.0,start_x+10.0,(vehicle-center)*4.0,8.0]] for vehicle in range(count)]
+    jitter=lambda scale:float(rng.uniform(-scale,scale))
+    z=8.0+jitter(0.6);common={"radius":0.5,"height":0.8}
+    if profile=="crossing":specs=[([start_x+3.5+jitter(0.4),-1.5*speed+jitter(0.3),z],[0.0,speed,jitter(0.08)])]
+    elif profile=="head_on":specs=[([start_x+7.5+jitter(0.5),jitter(0.35),z],[-speed,jitter(0.08),jitter(0.08)])]
+    elif profile=="diagonal":specs=[([start_x+5.5+jitter(0.4),-2.5+jitter(0.3),z-0.8],[-0.3*speed,speed,0.35])]
+    else:specs=[([start_x+3.5+jitter(0.3),-1.5*speed,z],[0.0,speed,0.05]),([start_x+7.5+jitter(0.4),jitter(0.3),z+0.5],[-speed,0.0,-0.12])]
+    obstacles=[]
+    for number,(position,velocity) in enumerate(specs):
+        value=dict(common);value.update({"id":"{}_{}_{}".format(profile,index,number),"position":position,"velocity":velocity});obstacles.append(value)
+    return paths,obstacles
 
 def predicted_paths(name,result,paths,horizon=3.0,dt=0.25):
     times=np.arange(0.0,horizon+1e-6,dt)
@@ -39,28 +52,56 @@ def trajectory_metrics(predicted,nominal,obstacles,horizon=3.0):
                 acceleration=np.diff(velocity,axis=0)/dt[1:,None];smoothness.extend(np.sum(acceleration*acceleration,axis=1).tolist())
     return {"minimum_separation_m":separation.get("minimum_separation_m"),"minimum_clearance_m":min(clearances) if clearances else None,"mean_deviation_m":float(np.mean(deviation)) if deviation else 0.0,"energy_proxy":float(np.mean(energy)) if energy else 0.0,"smoothness_proxy":float(np.mean(smoothness)) if smoothness else 0.0}
 
-def run(cases):
-    planners={name:create_local_planner(name) for name in ALGORITHMS};rows=[]
-    for index in range(cases):
-        paths,obstacles=scenario(index)
-        for name in ALGORITHMS:
-            started=time.perf_counter();result=planners[name].plan(paths,obstacles,horizon=3.0,minimum_separation=3.0,required_clearance=0.5,mpc_steps=6,mpc_dt=0.5,mpc_max_iterations=55);elapsed=1000.0*(time.perf_counter()-started)
-            metrics=trajectory_metrics(predicted_paths(name,result,paths),paths,obstacles)
-            rows.append(dict(case=index,algorithm=name,viable=bool(result.get("viable")),elapsed_ms=round(elapsed,3),rejections=result.get("rejection_summary") or {},solver_retries=sum(1 for item in result.get("commands") or [] if item.get("solver_retried")),warm_started=result.get("warm_started_vehicle_count",0),**metrics))
+def summarize_rows(values):
+    accepted=[row for row in values if row["viable"]];timings=sorted(row["elapsed_ms"] for row in values);rejections={}
+    for row in values:
+        for reason,count in row["rejections"].items():rejections[reason]=rejections.get(reason,0)+int(count)
+    accepted_clearance=[row["minimum_clearance_m"] for row in accepted if row["minimum_clearance_m"] is not None]
+    accepted_separation=[row["minimum_separation_m"] for row in accepted if row["minimum_separation_m"] is not None]
+    return {"cases":len(values),"viable":sum(row["viable"] for row in values),"viable_rate":round(sum(row["viable"] for row in values)/float(len(values)),4),"mean_ms":round(float(np.mean(timings)),3),"p95_ms":timings[min(len(timings)-1,int(0.95*(len(timings)-1)))],"max_ms":max(timings),"mean_accepted_clearance_m":None if not accepted_clearance else round(float(np.mean(accepted_clearance)),3),"minimum_accepted_separation_m":None if not accepted_separation else round(min(accepted_separation),3),"mean_deviation_m":round(float(np.mean([row["mean_deviation_m"] for row in values])),3),"mean_energy_proxy":round(float(np.mean([row["energy_proxy"] for row in values])),3),"mean_smoothness_proxy":round(float(np.mean([row["smoothness_proxy"] for row in values])),3),"solver_retries":sum(row["solver_retries"] for row in values),"rejections":rejections}
+
+def run(cases,profiles=("crossing",),speeds=(1.0,),seeds=(0,)):
+    profiles=tuple(profiles);speeds=tuple(float(value) for value in speeds);seeds=tuple(int(value) for value in seeds)
+    if not profiles or not speeds or not seeds:raise ValueError("profiles, speeds and seeds must not be empty")
+    if any(value not in PROFILES for value in profiles):raise ValueError("unknown scenario profile")
+    planners={name:create_local_planner(name) for name in ALGORITHMS};rows=[];case_id=0
+    for seed in seeds:
+        for profile in profiles:
+            for speed in speeds:
+                for sample in range(cases):
+                    paths,obstacles=scenario(sample,profile=profile,speed=speed,seed=seed)
+                    for name in ALGORITHMS:
+                        started=time.perf_counter();result=planners[name].plan(paths,obstacles,horizon=3.0,minimum_separation=3.0,required_clearance=0.5,mpc_steps=6,mpc_dt=0.5,mpc_max_iterations=55);elapsed=1000.0*(time.perf_counter()-started)
+                        metrics=trajectory_metrics(predicted_paths(name,result,paths),paths,obstacles)
+                        rows.append(dict(case=case_id,sample=sample,profile=profile,obstacle_speed_mps=speed,seed=seed,obstacle_count=len(obstacles),algorithm=name,viable=bool(result.get("viable")),elapsed_ms=round(elapsed,3),rejections=result.get("rejection_summary") or {},solver_retries=sum(1 for item in result.get("commands") or [] if item.get("solver_retried")),warm_started=result.get("warm_started_vehicle_count",0),**metrics))
+                    case_id+=1
     summary={}
     for name in ALGORITHMS:
-        values=[row for row in rows if row["algorithm"]==name];accepted=[row for row in values if row["viable"]];timings=sorted(row["elapsed_ms"] for row in values)
-        summary[name]={"cases":len(values),"viable":sum(row["viable"] for row in values),"viable_rate":round(sum(row["viable"] for row in values)/float(len(values)),4),"mean_ms":round(float(np.mean(timings)),3),"p95_ms":timings[min(len(timings)-1,int(0.95*(len(timings)-1)))],"max_ms":max(timings),"mean_accepted_clearance_m":None if not accepted else round(float(np.mean([row["minimum_clearance_m"] for row in accepted if row["minimum_clearance_m"] is not None])),3),"minimum_accepted_separation_m":None if not accepted else round(min(row["minimum_separation_m"] for row in accepted if row["minimum_separation_m"] is not None),3),"mean_deviation_m":round(float(np.mean([row["mean_deviation_m"] for row in values])),3),"mean_energy_proxy":round(float(np.mean([row["energy_proxy"] for row in values])),3),"mean_smoothness_proxy":round(float(np.mean([row["smoothness_proxy"] for row in values])),3),"solver_retries":sum(row["solver_retries"] for row in values)}
+        values=[row for row in rows if row["algorithm"]==name];overall=summarize_rows(values);overall["groups"]={}
+        for seed in seeds:
+            for profile in profiles:
+                for speed in speeds:
+                    group=[row for row in values if row["seed"]==seed and row["profile"]==profile and row["obstacle_speed_mps"]==speed]
+                    overall["groups"]["{}|{}|{}".format(profile,speed,seed)]=summarize_rows(group)
+        overall["profile_groups"]={profile:summarize_rows([row for row in values if row["profile"]==profile]) for profile in profiles}
+        overall["speed_groups"]={str(speed):summarize_rows([row for row in values if row["obstacle_speed_mps"]==speed]) for speed in speeds}
+        overall["seed_groups"]={str(seed):summarize_rows([row for row in values if row["seed"]==seed]) for seed in seeds}
+        summary[name]=overall
     return rows,summary
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument("--cases",type=int,default=30);parser.add_argument("--json",dest="json_path");parser.add_argument("--csv",dest="csv_path");args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument("--cases",type=int,default=30);parser.add_argument("--profiles",default="crossing");parser.add_argument("--speeds",default="1.0");parser.add_argument("--seeds",type=int,default=1);parser.add_argument("--json",dest="json_path");parser.add_argument("--csv",dest="csv_path");args=parser.parse_args()
     if not 1<=args.cases<=500:parser.error("--cases must be 1..500")
-    rows,summary=run(args.cases);print(json.dumps(summary,ensure_ascii=False,indent=2,sort_keys=True))
+    profiles=tuple(value.strip() for value in args.profiles.split(",") if value.strip());speeds=tuple(float(value) for value in args.speeds.split(",") if value.strip())
+    if any(value not in PROFILES for value in profiles):parser.error("--profiles contains an unknown profile")
+    if not speeds or any(value<=0.0 for value in speeds):parser.error("--speeds must contain positive values")
+    if not 1<=args.seeds<=100:parser.error("--seeds must be 1..100")
+    if args.cases*len(profiles)*len(speeds)*args.seeds>2000:parser.error("total scenarios must not exceed 2000")
+    rows,summary=run(args.cases,profiles,speeds,range(args.seeds));print(json.dumps(summary,ensure_ascii=False,indent=2,sort_keys=True))
     if args.json_path:
         with open(args.json_path,"w",encoding="utf-8") as handle:json.dump({"summary":summary,"rows":rows},handle,ensure_ascii=False,indent=2)
     if args.csv_path:
-        fields=["case","algorithm","viable","elapsed_ms","minimum_separation_m","minimum_clearance_m","mean_deviation_m","energy_proxy","smoothness_proxy","solver_retries","warm_started","rejections"]
+        fields=["case","sample","profile","obstacle_speed_mps","seed","obstacle_count","algorithm","viable","elapsed_ms","minimum_separation_m","minimum_clearance_m","mean_deviation_m","energy_proxy","smoothness_proxy","solver_retries","warm_started","rejections"]
         with open(args.csv_path,"w",newline="",encoding="utf-8") as handle:
             writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader()
             for row in rows:row=dict(row);row["rejections"]=json.dumps(row["rejections"],ensure_ascii=False,sort_keys=True);writer.writerow(row)

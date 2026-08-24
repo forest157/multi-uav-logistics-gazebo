@@ -79,6 +79,20 @@ Gazebo 完整回归仍为 `COMPLETE` 且三机解除武装：93 组预测中 58 
 
 MPC 的 17 次拒绝为 15 次 `DYNAMIC_CLEARANCE` 和 2 次 `MPC_SOLVER_FAILURE`。整队偏移的拒绝汇总是被淘汰候选偏移计数，最终 136 次均有安全候选，不属于规划失败。实际间距与净空来自 shadow 下相同名义飞行，只能验证任务基线一致，不能代表算法闭环效果。当前工程决策是 ORCA 保持受限闭环主算法、整队偏移作为稳定回退、MPC 继续 shadow 研究；MPC 尚不满足闭环授权门槛。
 
+## 多轨迹／多速度／多种子批量回放
+
+`benchmark_local_avoidance` 现支持 `crossing`、`head_on`、`diagonal` 和 `multi_bird` 四类三维动态障碍，包含高度扰动与垂直速度；可指定多个鸟速和确定性随机种子。JSON 同时输出总体、按轨迹、按速度、按 seed 和完整组合统计，CSV 每行保留场景元数据。
+
+```bash
+rosrun logistics_gazebo_sim benchmark_local_avoidance \
+  --cases 10 \
+  --profiles crossing,head_on,diagonal,multi_bird \
+  --speeds 0.8,1.5,2.5 --seeds 3 \
+  --json /tmp/avoidance_matrix.json --csv /tmp/avoidance_matrix.csv
+```
+
+首轮 48 场景冒烟矩阵（每组合 2 样本）共完成 144 次算法调用：整队偏移可行率 100%，ORCA 66.7%，MPC 31.3%；平均耗时分别为 10.83／0.47／117.33 ms。该矩阵刻意覆盖高难度交会且样本很小，只用于验证工具和发现薄弱组合，不能替代扩大样本后的最终排名。MPC 的主要问题仍是动态净空不足；ORCA 在部分高速横穿和斜穿组合中出现机间距或净空拒绝。78 项测试和 catkin 构建通过。
+
 ## 运行环境故障记录
 
 压力测试期间曾出现 SciPy `double free`、NumPy 随机类型错误以及纯 Python `copy.deepcopy` 段错误。逐逻辑 CPU 运行 20 万次纯 Python 分配测试后，CPU 8、9 稳定失败，其余 30 个逻辑 CPU 全部通过。容器已临时限制到 `0-7,10-31`；限制后连续 10 轮、每轮 50 万次健康检查全部通过，工程测试与 30 场景基准恢复稳定。该问题属于当前宿主机 CPU／平台稳定性，不应通过放宽算法安全门掩盖。宿主机后续应检查 BIOS、微码、超频／降压、内存和 CPU 稳定性。
