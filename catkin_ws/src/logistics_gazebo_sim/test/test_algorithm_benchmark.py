@@ -30,4 +30,13 @@ class AlgorithmBenchmarkTest(unittest.TestCase):
             self.assertEqual(value["cases"],2);self.assertGreaterEqual(value["viable_rate"],0.0);self.assertLessEqual(value["viable_rate"],1.0)
             self.assertGreaterEqual(value["mean_ms"],0.0);self.assertIn("minimum_accepted_separation_m",value)
         self.assertTrue(all("energy_proxy" in row and "smoothness_proxy" in row for row in rows))
+        self.assertTrue(all("executable_viable" in row and "kinematic_rejections" in row for row in rows))
+        self.assertTrue(all("executable_viable_rate" in value and "kinematic_rejections" in value for value in summary.values()))
+
+    def test_kinematic_gate_detects_instantaneous_velocity_change(self):
+        nominal=[[[0,0,0,8],[1,2,0,8],[2,4,0,8]]]
+        predicted=[[[0,0,0,8],[0.25,0,0.5,8],[0.5,0,1,8]]]
+        metrics=benchmark.trajectory_metrics(predicted,nominal,[])
+        self.assertFalse(metrics["kinematically_feasible"])
+        self.assertIn("HORIZONTAL_ACCELERATION_LIMIT",metrics["kinematic_rejections"])
 if __name__=="__main__":unittest.main()

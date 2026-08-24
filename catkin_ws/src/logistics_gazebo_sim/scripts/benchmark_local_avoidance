@@ -38,19 +38,27 @@ def predicted_paths(name,result,paths,horizon=3.0,dt=0.25):
         output.append([[float(value)]+[float(axis) for axis in start+velocity*value] for value in times])
     return output
 
-def trajectory_metrics(predicted,nominal,obstacles,horizon=3.0):
+def trajectory_metrics(predicted,nominal,obstacles,horizon=3.0,max_speed=2.0,max_acceleration=1.0,max_vertical_acceleration=0.6,max_climb_rate=0.8,limit_tolerance=1e-3):
     separation=assess_fleet_separation(predicted,horizon=horizon,minimum_separation=3.0)
     reports=[assess_timed_path(path,obstacles,horizon=horizon,warning_clearance=0.5) for path in predicted]
     clearances=[value["minimum_clearance_m"] for value in reports if value["minimum_clearance_m"] is not None]
-    deviation=[];energy=[];smoothness=[]
+    deviation=[];energy=[];smoothness=[];speeds=[];climb_rates=[];horizontal_axis_accelerations=[];vertical_accelerations=[]
     for path,reference in zip(predicted,nominal):
         values=np.asarray(path,dtype=float);positions=values[:,1:];times=values[:,0]
         for stamp,position in zip(times,positions):deviation.append(float(np.linalg.norm(position-interpolate_timed_path(reference,min(float(reference[-1][0]),float(stamp))))))
         if len(values)>1:
             dt=np.maximum(1e-3,np.diff(times));velocity=np.diff(positions,axis=0)/dt[:,None];energy.extend(np.sum(velocity*velocity,axis=1).tolist())
+            speeds.extend(np.linalg.norm(velocity,axis=1).tolist());climb_rates.extend(np.abs(velocity[:,2]).tolist())
+            reference_values=np.asarray(reference,dtype=float);reference_dt=max(1e-3,float(reference_values[1,0]-reference_values[0,0]));initial_velocity=(reference_values[1,1:]-reference_values[0,1:])/reference_dt
+            acceleration=np.vstack(((velocity[0]-initial_velocity)/dt[0],np.diff(velocity,axis=0)/dt[1:,None]))
+            horizontal_axis_accelerations.extend(np.abs(acceleration[:,:2]).ravel().tolist());vertical_accelerations.extend(np.abs(acceleration[:,2]).tolist())
             if len(velocity)>1:
-                acceleration=np.diff(velocity,axis=0)/dt[1:,None];smoothness.extend(np.sum(acceleration*acceleration,axis=1).tolist())
-    return {"minimum_separation_m":separation.get("minimum_separation_m"),"minimum_clearance_m":min(clearances) if clearances else None,"mean_deviation_m":float(np.mean(deviation)) if deviation else 0.0,"energy_proxy":float(np.mean(energy)) if energy else 0.0,"smoothness_proxy":float(np.mean(smoothness)) if smoothness else 0.0}
+                smoothness.extend(np.sum(acceleration[1:]*acceleration[1:],axis=1).tolist())
+    maxima={"maximum_speed_mps":max(speeds) if speeds else 0.0,"maximum_climb_rate_mps":max(climb_rates) if climb_rates else 0.0,"maximum_horizontal_axis_acceleration_mps2":max(horizontal_axis_accelerations) if horizontal_axis_accelerations else 0.0,"maximum_vertical_acceleration_mps2":max(vertical_accelerations) if vertical_accelerations else 0.0}
+    violations={}
+    for key,value,limit in (("SPEED_LIMIT",maxima["maximum_speed_mps"],max_speed),("CLIMB_RATE_LIMIT",maxima["maximum_climb_rate_mps"],max_climb_rate),("HORIZONTAL_ACCELERATION_LIMIT",maxima["maximum_horizontal_axis_acceleration_mps2"],max_acceleration),("VERTICAL_ACCELERATION_LIMIT",maxima["maximum_vertical_acceleration_mps2"],max_vertical_acceleration)):
+        if value>limit+limit_tolerance:violations[key]=1
+    return {"minimum_separation_m":separation.get("minimum_separation_m"),"minimum_clearance_m":min(clearances) if clearances else None,"mean_deviation_m":float(np.mean(deviation)) if deviation else 0.0,"energy_proxy":float(np.mean(energy)) if energy else 0.0,"smoothness_proxy":float(np.mean(smoothness)) if smoothness else 0.0,"kinematically_feasible":not violations,"kinematic_rejections":violations,**maxima}
 
 def summarize_rows(values):
     accepted=[row for row in values if row["viable"]];timings=sorted(row["elapsed_ms"] for row in values);rejections={}
@@ -58,7 +66,11 @@ def summarize_rows(values):
         for reason,count in row["rejections"].items():rejections[reason]=rejections.get(reason,0)+int(count)
     accepted_clearance=[row["minimum_clearance_m"] for row in accepted if row["minimum_clearance_m"] is not None]
     accepted_separation=[row["minimum_separation_m"] for row in accepted if row["minimum_separation_m"] is not None]
-    return {"cases":len(values),"viable":sum(row["viable"] for row in values),"viable_rate":round(sum(row["viable"] for row in values)/float(len(values)),4),"mean_ms":round(float(np.mean(timings)),3),"p95_ms":timings[min(len(timings)-1,int(0.95*(len(timings)-1)))],"max_ms":max(timings),"mean_accepted_clearance_m":None if not accepted_clearance else round(float(np.mean(accepted_clearance)),3),"minimum_accepted_separation_m":None if not accepted_separation else round(min(accepted_separation),3),"mean_deviation_m":round(float(np.mean([row["mean_deviation_m"] for row in values])),3),"mean_energy_proxy":round(float(np.mean([row["energy_proxy"] for row in values])),3),"mean_smoothness_proxy":round(float(np.mean([row["smoothness_proxy"] for row in values])),3),"solver_retries":sum(row["solver_retries"] for row in values),"rejections":rejections}
+    kinematic_rejections={}
+    for row in values:
+        for reason,count in row["kinematic_rejections"].items():kinematic_rejections[reason]=kinematic_rejections.get(reason,0)+int(count)
+    executable=sum(row["executable_viable"] for row in values)
+    return {"cases":len(values),"viable":sum(row["viable"] for row in values),"viable_rate":round(sum(row["viable"] for row in values)/float(len(values)),4),"executable_viable":executable,"executable_viable_rate":round(executable/float(len(values)),4),"mean_ms":round(float(np.mean(timings)),3),"p95_ms":timings[min(len(timings)-1,int(0.95*(len(timings)-1)))],"max_ms":max(timings),"mean_accepted_clearance_m":None if not accepted_clearance else round(float(np.mean(accepted_clearance)),3),"minimum_accepted_separation_m":None if not accepted_separation else round(min(accepted_separation),3),"mean_deviation_m":round(float(np.mean([row["mean_deviation_m"] for row in values])),3),"mean_energy_proxy":round(float(np.mean([row["energy_proxy"] for row in values])),3),"mean_smoothness_proxy":round(float(np.mean([row["smoothness_proxy"] for row in values])),3),"solver_retries":sum(row["solver_retries"] for row in values),"rejections":rejections,"kinematic_rejections":kinematic_rejections}
 
 def run(cases,profiles=("crossing",),speeds=(1.0,),seeds=(0,)):
     profiles=tuple(profiles);speeds=tuple(float(value) for value in speeds);seeds=tuple(int(value) for value in seeds)
@@ -73,7 +85,7 @@ def run(cases,profiles=("crossing",),speeds=(1.0,),seeds=(0,)):
                     for name in ALGORITHMS:
                         started=time.perf_counter();result=planners[name].plan(paths,obstacles,horizon=3.0,minimum_separation=3.0,required_clearance=0.5,mpc_steps=6,mpc_dt=0.5,mpc_max_iterations=55);elapsed=1000.0*(time.perf_counter()-started)
                         metrics=trajectory_metrics(predicted_paths(name,result,paths),paths,obstacles)
-                        rows.append(dict(case=case_id,sample=sample,profile=profile,obstacle_speed_mps=speed,seed=seed,obstacle_count=len(obstacles),algorithm=name,viable=bool(result.get("viable")),elapsed_ms=round(elapsed,3),rejections=result.get("rejection_summary") or {},solver_retries=sum(1 for item in result.get("commands") or [] if item.get("solver_retried")),warm_started=result.get("warm_started_vehicle_count",0),**metrics))
+                        viable=bool(result.get("viable"));rows.append(dict(case=case_id,sample=sample,profile=profile,obstacle_speed_mps=speed,seed=seed,obstacle_count=len(obstacles),algorithm=name,viable=viable,executable_viable=bool(viable and metrics["kinematically_feasible"]),elapsed_ms=round(elapsed,3),rejections=result.get("rejection_summary") or {},solver_retries=sum(1 for item in result.get("commands") or [] if item.get("solver_retried")),warm_started=result.get("warm_started_vehicle_count",0),**metrics))
                     case_id+=1
     summary={}
     for name in ALGORITHMS:
@@ -101,8 +113,8 @@ def main():
     if args.json_path:
         with open(args.json_path,"w",encoding="utf-8") as handle:json.dump({"summary":summary,"rows":rows},handle,ensure_ascii=False,indent=2)
     if args.csv_path:
-        fields=["case","sample","profile","obstacle_speed_mps","seed","obstacle_count","algorithm","viable","elapsed_ms","minimum_separation_m","minimum_clearance_m","mean_deviation_m","energy_proxy","smoothness_proxy","solver_retries","warm_started","rejections"]
+        fields=["case","sample","profile","obstacle_speed_mps","seed","obstacle_count","algorithm","viable","executable_viable","kinematically_feasible","maximum_speed_mps","maximum_climb_rate_mps","maximum_horizontal_axis_acceleration_mps2","maximum_vertical_acceleration_mps2","elapsed_ms","minimum_separation_m","minimum_clearance_m","mean_deviation_m","energy_proxy","smoothness_proxy","solver_retries","warm_started","rejections","kinematic_rejections"]
         with open(args.csv_path,"w",newline="",encoding="utf-8") as handle:
             writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader()
-            for row in rows:row=dict(row);row["rejections"]=json.dumps(row["rejections"],ensure_ascii=False,sort_keys=True);writer.writerow(row)
+            for row in rows:row=dict(row);row["rejections"]=json.dumps(row["rejections"],ensure_ascii=False,sort_keys=True);row["kinematic_rejections"]=json.dumps(row["kinematic_rejections"],ensure_ascii=False,sort_keys=True);writer.writerow(row)
 if __name__=="__main__":main()
