@@ -94,6 +94,16 @@ class LocalAvoidanceTest(unittest.TestCase):
         self.assertEqual(first["warm_started_vehicle_count"],0);self.assertGreater(second["warm_started_vehicle_count"],0)
 
 
+    def test_distributed_mpc_consensus_preserves_nominal_offsets(self):
+        result=DistributedMpcPlanner().plan(self.paths(3),[],mpc_consensus_strength=1.0)
+        self.assertTrue(result["viable"]);self.assertEqual(result["consensus_strength"],1.0)
+        trajectories=np.asarray(result["trajectories"],dtype=float)[:,:,1:]
+        relative=trajectories[1]-trajectories[0]
+        np.testing.assert_allclose(relative,np.tile(relative[0],(len(relative),1)),atol=2e-4)
+        self.assertGreaterEqual(result["fleet_separation"]["minimum_separation_m"],3.99)
+        with self.assertRaises(DynamicObstacleError):DistributedMpcPlanner().plan(self.paths(3),[],mpc_consensus_strength=1.1)
+
+
     def test_distributed_mpc_timeout_is_contained(self):
         result=DistributedMpcPlanner().plan(self.paths(3),[],mpc_vehicle_timeout_s=0.0001)
         self.assertFalse(result["viable"]);self.assertTrue(result["solver_isolated"])

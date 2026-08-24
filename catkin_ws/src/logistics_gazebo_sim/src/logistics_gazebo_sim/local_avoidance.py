@@ -248,6 +248,15 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
             trajectory=[[round(float(query[index]),3)]+[round(float(axis),4) for axis in positions[index]] for index in range(steps+1)]
             trajectories.append(trajectory);solve_times.append(elapsed_ms);iterations.append(int(solver.get("iterations",0)));next_warm.append(accelerations.copy() if success else cold.copy())
             commands.append({"vehicle_id":"uav{}".format(vehicle),"velocity":[round(float(axis),4) for axis in velocities[0]],"preferred_velocity":[round(float(axis),4) for axis in initial_velocities[vehicle]],"acceleration":[round(float(axis),4) for axis in accelerations[0]],"solver_success":success,"solver_status":int(solver.get("status",-2)),"solver_message":solver.get("error",solver.get("message","unknown solver result")),"iterations":int(solver.get("iterations",0)),"solve_time_ms":round(elapsed_ms,3),"solver_retried":retried})
+        consensus_strength=float(options.get("mpc_consensus_strength",1.0))
+        if not 0.0<=consensus_strength<=1.0:raise DynamicObstacleError("MPC consensus strength must be in [0,1]")
+        if count>1 and consensus_strength>0.0:
+            planned=np.asarray([[row[1:] for row in path] for path in trajectories],dtype=float);reference_stack=np.asarray(references,dtype=float);displacements=planned-reference_stack;shared=np.mean(displacements,axis=0)
+            projected=reference_stack+(1.0-consensus_strength)*displacements+consensus_strength*shared[None,:,:]
+            for vehicle in range(count):
+                trajectories[vehicle]=[[round(float(query[index]),3)]+[round(float(axis),4) for axis in projected[vehicle,index]] for index in range(steps+1)]
+                velocity=(projected[vehicle,1]-projected[vehicle,0])/dt;acceleration=(velocity-initial_velocities[vehicle])/dt
+                commands[vehicle]["velocity"]=[round(float(axis),4) for axis in velocity];commands[vehicle]["acceleration"]=[round(float(axis),4) for axis in acceleration]
         self._warm_accelerations=next_warm;self._warm_starts=[value.copy() for value in starts];self._warm_shape=(count,steps)
         reports=[assess_timed_path(path,checked,horizon=steps*dt,warning_clearance=required_clearance) for path in trajectories]
         dynamic_safe=all(report["minimum_clearance_m"] is None or report["minimum_clearance_m"]>=required_clearance for report in reports)
@@ -261,7 +270,7 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
         if not dynamic_safe:rejections["DYNAMIC_CLEARANCE"]=1
         if not fleet["safe"]:rejections["VEHICLE_SEPARATION"]=1
         if not static["feasible"]:rejections[static.get("error_code") or "STATIC_CONSTRAINT"]=1
-        return {"viable":bool(viable),"algorithm":self.name,"command_type":self.command_type,"vehicle_count":count,"commands":commands,"trajectories":trajectories,"constraints_satisfied":bool(dynamic_safe and fleet["safe"] and static["feasible"]),"static_validation":static,"fleet_separation":fleet,"dynamic_reports":reports,"solve_time_ms":{"total":round(sum(solve_times),3),"maximum":round(max(solve_times),3),"mean":round(sum(solve_times)/len(solve_times),3)},"iterations":{"maximum":max(iterations),"mean":round(sum(iterations)/len(iterations),2)},"warm_started_vehicle_count":sum(1 for value in warm_used if value),"reason":"distributed MPC shadow trajectory generated" if viable else "distributed MPC failed solver or independent safety validation","shadow_mode":True,"requires_external_safety_gate":True,"solver_isolated":True,"rejection_summary":rejections}
+        return {"viable":bool(viable),"algorithm":self.name,"command_type":self.command_type,"vehicle_count":count,"commands":commands,"trajectories":trajectories,"constraints_satisfied":bool(dynamic_safe and fleet["safe"] and static["feasible"]),"static_validation":static,"fleet_separation":fleet,"dynamic_reports":reports,"solve_time_ms":{"total":round(sum(solve_times),3),"maximum":round(max(solve_times),3),"mean":round(sum(solve_times)/len(solve_times),3)},"iterations":{"maximum":max(iterations),"mean":round(sum(iterations)/len(iterations),2)},"warm_started_vehicle_count":sum(1 for value in warm_used if value),"consensus_strength":consensus_strength,"reason":"distributed MPC shadow trajectory generated" if viable else "distributed MPC failed solver or independent safety validation","shadow_mode":True,"requires_external_safety_gate":True,"solver_isolated":True,"rejection_summary":rejections}
 
 
 class Orca3DPlanner(LocalAvoidancePlanner):
