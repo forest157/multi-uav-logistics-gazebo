@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from logistics_gazebo_sim.local_avoidance import (
-    CollectiveOffsetPlanner, Orca3DPlanner, OrcaCommandGate, orca_position_targets, available_local_planners,
+    CollectiveOffsetPlanner, Orca3DPlanner, DistributedMpcPlanner, OrcaCommandGate, orca_position_targets, available_local_planners,
     create_local_planner)
 from logistics_gazebo_sim.dynamic_obstacles import DynamicObstacleError
 
@@ -12,9 +12,10 @@ class LocalAvoidanceTest(unittest.TestCase):
         return [[[0.0,0.0,(i-middle)*4.0,8.0],[5.0,10.0,(i-middle)*4.0,8.0]]
                 for i in range(count)]
     def test_registry_keeps_stable_planner_and_adds_orca(self):
-        self.assertEqual(available_local_planners(),("collective_offset","orca3d"))
+        self.assertEqual(available_local_planners(),("collective_offset","distributed_mpc","orca3d"))
         self.assertIsInstance(create_local_planner("collective_offset"),CollectiveOffsetPlanner)
         self.assertIsInstance(create_local_planner("orca3d"),Orca3DPlanner)
+        self.assertIsInstance(create_local_planner("distributed_mpc"),DistributedMpcPlanner)
         with self.assertRaises(DynamicObstacleError):create_local_planner("missing")
     def test_orca_scales_to_eight_vehicles(self):
         result=Orca3DPlanner().plan(self.paths(8),[],max_speed=3.0)
@@ -74,6 +75,21 @@ class LocalAvoidanceTest(unittest.TestCase):
         targets=orca_position_targets([(1,2,3),(0,0,4)],[(2,0,-1),(0,1,0)],0.5)
         self.assertEqual(targets,[(2.0,2.0,2.5),(0.0,0.5,4.0)])
         with self.assertRaises(DynamicObstacleError):orca_position_targets([(0,0,0)],[],0.5)
+
+    def test_distributed_mpc_generates_safe_shadow_trajectories(self):
+        paths=self.paths(3)
+        obstacle={"id":"bird","position":[5,0,8],"velocity":[0,0,0],"radius":0.5,"height":0.8}
+        result=DistributedMpcPlanner().plan(paths,[obstacle],mpc_steps=6,mpc_dt=0.5,mpc_max_iterations=55)
+        self.assertTrue(result["viable"]);self.assertTrue(result["shadow_mode"])
+        self.assertEqual(result["command_type"],"per_vehicle_trajectory")
+        self.assertEqual(len(result["trajectories"]),3)
+        self.assertTrue(result["fleet_separation"]["safe"])
+        self.assertLess(result["solve_time_ms"]["total"],1500.0)
+
+    def test_distributed_mpc_rejects_physically_late_avoidance(self):
+        obstacle={"id":"bird","position":[1,0,8],"velocity":[0,0,0],"radius":1.0,"height":1.0}
+        result=DistributedMpcPlanner().plan([[[0,0,0,8],[3,6,0,8]]],[obstacle],mpc_steps=4,mpc_dt=0.4)
+        self.assertFalse(result["viable"]);self.assertIn("DYNAMIC_CLEARANCE",result["rejection_summary"])
 
     def test_collective_adapter_preserves_legacy_contract(self):
         result=CollectiveOffsetPlanner().plan(self.paths(),[],candidate_offsets=[[0,0,0]])

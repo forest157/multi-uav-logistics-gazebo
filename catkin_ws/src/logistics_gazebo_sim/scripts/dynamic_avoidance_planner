@@ -22,7 +22,11 @@ class Planner:
             algorithm=options.pop("algorithm",self.algorithm)
             avoidance=create_local_planner(algorithm).plan(
                 payload["paths"],payload["obstacles"],**options)
-            avoidance["contract_version"]="orca_velocity_v1" if avoidance.get("command_type")=="per_vehicle_velocity" else "collective_offset_v1"
+            if algorithm=="distributed_mpc" and not avoidance.get("viable"):
+                fallback=create_local_planner("orca3d").plan(payload["paths"],payload["obstacles"],**options)
+                avoidance["fallback_algorithm"]="orca3d";avoidance["fallback"]=fallback
+                avoidance["reason"]+="; ORCA fallback {}".format("available" if fallback.get("viable") else "unavailable")
+            avoidance["contract_version"]={"per_vehicle_velocity":"orca_velocity_v1","per_vehicle_trajectory":"mpc_trajectory_v1"}.get(avoidance.get("command_type"),"collective_offset_v1")
             avoidance["stamp"]=rospy.get_time()
             avoidance["valid_for_s"]=0.6
             result={"request_id":payload["request_id"],"avoidance":avoidance}

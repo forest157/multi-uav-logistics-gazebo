@@ -56,7 +56,7 @@ class OperatorPlugin(Plugin):
         self.formation.addItem("纵向一字队形（窄通道）","column");self.formation.addItem("垂直错层队形","vertical");self.formation.addItem("三维楔形队形","wedge3d");self.formation.addItem("三维螺旋队形","helix")
         self.dynamic_enabled=QCheckBox("启用交叉移动障碍物与在线风险预测");self.dynamic_enabled.setChecked(True)
         form.addRow("动态避障实验",self.dynamic_enabled)
-        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队偏移（稳定闭环）",("collective_offset","shadow",True));self.avoidance_mode.addItem("3D ORCA（影子模式）",("orca3d","shadow",False));self.avoidance_mode.addItem("3D ORCA（受限接管）",("orca3d","limited",True));form.addRow("局部避障模式",self.avoidance_mode)
+        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队偏移（稳定闭环）",("collective_offset","shadow",True));self.avoidance_mode.addItem("3D ORCA（影子模式）",("orca3d","shadow",False));self.avoidance_mode.addItem("分布式 MPC（影子模式）",("distributed_mpc","shadow",False));self.avoidance_mode.addItem("3D ORCA（受限接管）",("orca3d","limited",True));form.addRow("局部避障模式",self.avoidance_mode)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
@@ -373,6 +373,8 @@ class OperatorPlugin(Plugin):
             if algorithm:text+=" | 算法 {}".format(algorithm)
             if avoidance.get("viable") and avoidance.get("command_type")=="per_vehicle_velocity":
                 text+=" | ORCA速度建议 {} 架（{}）".format(len(avoidance.get("commands") or []),"受限接管" if self.avoidance_mode.currentData()[1]=="limited" else "影子模式")
+            elif avoidance.get("viable") and avoidance.get("command_type")=="per_vehicle_trajectory":
+                timing=avoidance.get("solve_time_ms") or {};text+=" | MPC影子轨迹 {} 架 | 求解 {} ms".format(len(avoidance.get("trajectories") or []),timing.get("total","-"))
             elif avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
             elif level in ("WARNING","CRITICAL"):
                 summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}

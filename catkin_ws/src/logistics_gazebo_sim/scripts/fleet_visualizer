@@ -18,11 +18,12 @@ class Visualizer:
         self.spawns=[(sx+dx,sy+dy) for dx,dy in line_spawn_offsets(self.count,spacing)]
         self.colors=indexed_palette(self.count)
         self.poses, self.targets, self.trails = [None]*self.count, [None]*self.count, [[] for _ in range(self.count)]
-        self.orca_velocities=[None]*self.count;self.predicted_paths=[[] for _ in range(self.count)]
+        self.orca_velocities=[None]*self.count;self.predicted_paths=[[] for _ in range(self.count)];self.mpc_paths=[[] for _ in range(self.count)]
         for i in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
             rospy.Subscriber("/uav{}/target_pose".format(i),PoseStamped,self.target_cb,callback_args=i,queue_size=1)
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1)
+        rospy.Subscriber("/fleet/dynamic_risk",String,self.risk_cb,queue_size=1)
         rospy.Subscriber("/fleet/nominal_prediction",String,self.prediction_cb,queue_size=1)
         self.pub=rospy.Publisher("/fleet/markers",MarkerArray,queue_size=2,latch=True)
     def pose_cb(self,msg,i):
@@ -37,6 +38,12 @@ class Visualizer:
             values=execution.get("velocities") if execution.get("action")=="ORCA" else None
             self.orca_velocities=values if isinstance(values,list) and len(values)==self.count else [None]*self.count
         except (TypeError,ValueError):self.orca_velocities=[None]*self.count
+    def risk_cb(self,msg):
+        try:
+            avoidance=(json.loads(msg.data).get("avoidance") or {})
+            paths=avoidance.get("trajectories") if avoidance.get("command_type")=="per_vehicle_trajectory" else None
+            self.mpc_paths=[[Point(float(row[1]),float(row[2]),float(row[3])) for row in path] for path in paths] if isinstance(paths,list) and len(paths)==self.count else [[] for _ in range(self.count)]
+        except (TypeError,ValueError,IndexError):self.mpc_paths=[[] for _ in range(self.count)]
     def prediction_cb(self,msg):
         try:
             paths=json.loads(msg.data).get("paths") or []
@@ -75,6 +82,8 @@ class Visualizer:
                         arrow.points=[p,Point(p.x+velocity[0],p.y+velocity[1],p.z+velocity[2])];arrow.scale.x,arrow.scale.y,arrow.scale.z=0.10,0.20,0.20;self.color(arrow,(1.0,0.55,0.05));arr.markers.append(arrow)
                     if self.predicted_paths[i]:
                         prediction=self.marker(50+i,Marker.LINE_STRIP,"nominal_prediction");prediction.scale.x=0.07;prediction.points=self.predicted_paths[i];self.color(prediction,self.colors[i],0.35);arr.markers.append(prediction)
+                    if self.mpc_paths[i]:
+                        mpc=self.marker(60+i,Marker.LINE_STRIP,"mpc_shadow_prediction");mpc.scale.x=0.11;mpc.points=self.mpc_paths[i];self.color(mpc,(0.75,0.25,1.0),0.8);arr.markers.append(mpc)
                 if self.targets[i]:
                     t=self.marker(30+i,Marker.SPHERE,"targets");t.pose.position=self.targets[i];t.scale.x=t.scale.y=t.scale.z=0.35;self.color(t,self.colors[i],0.45);arr.markers.append(t)
             self.pub.publish(arr);rate.sleep()

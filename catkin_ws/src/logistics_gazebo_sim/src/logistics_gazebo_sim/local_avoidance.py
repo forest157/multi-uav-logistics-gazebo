@@ -1,9 +1,12 @@
 """Pluggable local avoidance algorithms for scalable 3D fleets."""
 import math
+import time
+import warnings
 import numpy as np
+from scipy.optimize import minimize
 
 from logistics_gazebo_sim.dynamic_obstacles import (
-    DynamicObstacleError, interpolate_timed_path, plan_collective_avoidance,
+    DynamicObstacleError, assess_fleet_separation, assess_timed_path, interpolate_timed_path, plan_collective_avoidance,
     validate_static_paths,
     validate_obstacle)
 
@@ -151,6 +154,80 @@ class CollectiveOffsetPlanner(LocalAvoidancePlanner):
         return result
 
 
+class DistributedMpcPlanner(LocalAvoidancePlanner):
+    """Per-vehicle finite-horizon optimizer for v0.4.3 shadow evaluation."""
+    name="distributed_mpc";command_type="per_vehicle_trajectory"
+    def plan(self,paths,obstacles,**options):
+        if not paths:raise DynamicObstacleError("at least one vehicle path is required")
+        count=len(paths);steps=int(options.get("mpc_steps",6));dt=float(options.get("mpc_dt",0.4))
+        max_speed=float(options.get("max_speed",2.0));max_acc=float(options.get("max_acceleration",1.0))
+        max_vertical_acc=float(options.get("max_vertical_acceleration",0.6));max_climb=float(options.get("max_climb_rate",0.8))
+        separation=float(options.get("minimum_separation",3.0));required_clearance=float(options.get("required_clearance",0.5))
+        max_iterations=int(options.get("mpc_max_iterations",45));scene_id=options.get("scene_id")
+        if not 1<=count<=32 or not 2<=steps<=20 or min(dt,max_speed,max_acc,max_vertical_acc,max_climb,separation)<=0.0:
+            raise DynamicObstacleError("MPC dimensions and limits are invalid")
+        checked=[validate_obstacle(value) for value in obstacles]
+        arrays=[np.asarray(path,dtype=float) for path in paths]
+        query=np.arange(steps+1,dtype=float)*dt
+        references=[np.asarray([interpolate_timed_path(path,min(float(path[-1,0]),float(path[0,0])+seconds)) for seconds in query]) for path in arrays]
+        starts=[];initial_velocities=[]
+        for path in arrays:
+            position,velocity=_path_state(path,min(dt,float(path[-1,0])-float(path[0,0])))
+            starts.append(position);initial_velocities.append(_clamp(velocity,max_speed))
+        trajectories=[];commands=[];solve_times=[];iterations=[];all_success=True
+        bounds=[]
+        for _ in range(steps):bounds.extend([(-max_acc,max_acc),(-max_acc,max_acc),(-max_vertical_acc,max_vertical_acc)])
+        for vehicle in range(count):
+            start_clock=time.perf_counter();previous=np.zeros((steps,3),dtype=float)
+            avoid_direction=np.cross(initial_velocities[vehicle],np.asarray([0.0,0.0,1.0]))
+            if float(np.linalg.norm(avoid_direction))<1e-6:avoid_direction=np.asarray([0.0,1.0,0.0])
+            avoid_direction=avoid_direction/float(np.linalg.norm(avoid_direction))
+            def rollout(flat):
+                accelerations=np.asarray(flat,dtype=float).reshape((steps,3));position=starts[vehicle].copy();velocity=initial_velocities[vehicle].copy();positions=[position.copy()];velocities=[]
+                for acceleration in accelerations:
+                    velocity=_clamp(velocity+acceleration*dt,max_speed);velocity[2]=max(-max_climb,min(max_climb,velocity[2]));position=position+velocity*dt;positions.append(position.copy());velocities.append(velocity.copy())
+                return np.asarray(positions),np.asarray(velocities),accelerations
+            def objective(flat):
+                positions,velocities,accelerations=rollout(flat);cost=0.0
+                cost+=4.0*float(np.sum((positions-references[vehicle])**2))
+                cost+=0.20*float(np.sum(accelerations**2))+0.35*float(np.sum(np.diff(accelerations,axis=0)**2))
+                cost+=0.08*float(np.sum(velocities**2))
+                for step_index in range(1,steps+1):
+                    seconds=query[step_index];position=positions[step_index]
+                    for obstacle in checked:
+                        obstacle_center=obstacle["position"]+obstacle["velocity"]*seconds;safe=1.2+obstacle["radius"]+0.5+required_clearance
+                        for source in range(count):
+                            formation_delta=references[vehicle][step_index]-references[source][step_index]
+                            center=obstacle_center+formation_delta;gap=float(np.linalg.norm(position-center));weight=1200.0 if source==vehicle else 700.0
+                            cost+=weight*max(0.0,safe-gap)**2
+                            if gap<2.0*safe:
+                                lateral=float(np.dot(position-center,avoid_direction));cost+=400.0*max(0.0,safe-lateral)**2
+                    for peer in range(count):
+                        if peer==vehicle:continue
+                        peer_position=references[peer][step_index];gap=float(np.linalg.norm(position-peer_position));cost+=5000.0*max(0.0,separation-gap)**2
+                        nominal_relative=references[vehicle][step_index]-peer_position;actual_relative=position-peer_position;cost+=2.0*float(np.sum((actual_relative-nominal_relative)**2))
+                return cost
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore",RuntimeWarning)
+                result=minimize(objective,previous.ravel(),method="SLSQP",bounds=bounds,options={"maxiter":max_iterations,"ftol":1e-4})
+            positions,velocities,accelerations=rollout(result.x);elapsed_ms=1000.0*(time.perf_counter()-start_clock)
+            success=bool((result.success or int(result.status)==8) and np.all(np.isfinite(positions)) and np.isfinite(result.fun));all_success=all_success and success
+            trajectory=[[round(float(query[index]),3)]+[round(float(axis),4) for axis in positions[index]] for index in range(steps+1)]
+            trajectories.append(trajectory);solve_times.append(elapsed_ms);iterations.append(int(result.nit))
+            commands.append({"vehicle_id":"uav{}".format(vehicle),"velocity":[round(float(axis),4) for axis in velocities[0]],"preferred_velocity":[round(float(axis),4) for axis in initial_velocities[vehicle]],"acceleration":[round(float(axis),4) for axis in accelerations[0]],"solver_success":success,"solver_status":int(result.status),"solver_message":str(result.message),"iterations":int(result.nit),"solve_time_ms":round(elapsed_ms,3)})
+        reports=[assess_timed_path(path,checked,horizon=steps*dt,warning_clearance=required_clearance) for path in trajectories]
+        dynamic_safe=all(report["minimum_clearance_m"] is None or report["minimum_clearance_m"]>=required_clearance for report in reports)
+        fleet=assess_fleet_separation(trajectories,horizon=steps*dt,minimum_separation=separation)
+        static=(validate_static_paths(scene_id,trajectories) if scene_id is not None else {"feasible":True,"error_code":None,"message":"static validation disabled"})
+        viable=all_success and dynamic_safe and fleet["safe"] and static["feasible"]
+        rejections={}
+        if not all_success:rejections["MPC_SOLVER_FAILURE"]=sum(1 for command in commands if not command["solver_success"])
+        if not dynamic_safe:rejections["DYNAMIC_CLEARANCE"]=1
+        if not fleet["safe"]:rejections["VEHICLE_SEPARATION"]=1
+        if not static["feasible"]:rejections[static.get("error_code") or "STATIC_CONSTRAINT"]=1
+        return {"viable":bool(viable),"algorithm":self.name,"command_type":self.command_type,"vehicle_count":count,"commands":commands,"trajectories":trajectories,"constraints_satisfied":bool(dynamic_safe and fleet["safe"] and static["feasible"]),"static_validation":static,"fleet_separation":fleet,"dynamic_reports":reports,"solve_time_ms":{"total":round(sum(solve_times),3),"maximum":round(max(solve_times),3),"mean":round(sum(solve_times)/len(solve_times),3)},"iterations":{"maximum":max(iterations),"mean":round(sum(iterations)/len(iterations),2)},"reason":"distributed MPC shadow trajectory generated" if viable else "distributed MPC failed solver or independent safety validation","shadow_mode":True,"requires_external_safety_gate":True,"rejection_summary":rejections}
+
+
 class Orca3DPlanner(LocalAvoidancePlanner):
     """Dependency-free spherical 3D ORCA prototype.
 
@@ -256,7 +333,7 @@ class Orca3DPlanner(LocalAvoidancePlanner):
             "shadow_mode":False,"requires_external_safety_gate":True,"rejection_summary":rejections}
 
 
-_PLANNERS={value.name:value for value in (CollectiveOffsetPlanner,Orca3DPlanner)}
+_PLANNERS={value.name:value for value in (CollectiveOffsetPlanner,Orca3DPlanner,DistributedMpcPlanner)}
 
 def available_local_planners():return tuple(sorted(_PLANNERS))
 
