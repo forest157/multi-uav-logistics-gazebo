@@ -17,6 +17,9 @@ class V043ConfigurationTest(unittest.TestCase):
         self.assertIn('value="$(arg local_avoidance_algorithm)"',xml)
         self.assertIn('name="expected_vehicle_count" value="$(arg vehicle_count)"',xml)
         self.assertGreaterEqual(xml.count("orca_control_mode"),2)
+        recorder=Path(ROOT,"scripts","mission_recorder").read_text(encoding="utf-8")
+        for field in ("planner_viable","planner_reason","planner_time_ms","planner_rejections"):
+            self.assertIn(field,recorder)
     def test_python_and_ros_package_versions_match(self):
         package=ET.parse(os.path.join(ROOT,"package.xml")).getroot().findtext("version")
         setup=Path(ROOT,"setup.py").read_text(encoding="utf-8")

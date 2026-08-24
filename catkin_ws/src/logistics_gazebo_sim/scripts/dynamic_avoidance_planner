@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated collective avoidance planner ROS worker."""
 import json
+import time
 
 import rospy
 from std_msgs.msg import String
@@ -17,6 +18,7 @@ class Planner:
 
     def callback(self, message):
         payload={}
+        started=time.perf_counter()
         try:
             payload=json.loads(message.data)
             options=dict(payload.get("options",{}))
@@ -29,6 +31,7 @@ class Planner:
                 fallback=self.planners["orca3d"].plan(payload["paths"],payload["obstacles"],**options)
                 avoidance["fallback_algorithm"]="orca3d";avoidance["fallback"]=fallback
                 avoidance["reason"]+="; ORCA fallback {}".format("available" if fallback.get("viable") else "unavailable")
+            avoidance["planning_time_ms"]=round((time.perf_counter()-started)*1000.0,3)
             avoidance["contract_version"]={"per_vehicle_velocity":"orca_velocity_v1","per_vehicle_trajectory":"mpc_trajectory_v1"}.get(avoidance.get("command_type"),"collective_offset_v1")
             avoidance["stamp"]=rospy.get_time()
             avoidance["valid_for_s"]=0.6
@@ -39,6 +42,7 @@ class Planner:
                 "reason":"isolated avoidance planner failure",
                 "candidates":[],"minimum_clearance_m":None,
                 "rejection_summary":{"PLANNER_FAILURE":1}}
+            avoidance["planning_time_ms"]=round((time.perf_counter()-started)*1000.0,3)
             result={"request_id":payload.get("request_id") if
                     isinstance(payload,dict) else None,"avoidance":avoidance}
         self.pub.publish(json.dumps(result,separators=(",",":")))
