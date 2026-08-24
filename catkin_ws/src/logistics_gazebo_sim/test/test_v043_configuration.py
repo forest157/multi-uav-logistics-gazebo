@@ -23,6 +23,12 @@ class V043ConfigurationTest(unittest.TestCase):
         player=Path(ROOT,"scripts","fleet_mission_player").read_text(encoding="utf-8")
         self.assertIn('get("PLANNER_PENDING")',player)
         self.assertIn('"WAITING","action":"SLOW"',player)
+        operator=Path(ROOT,"src","logistics_gazebo_sim","operator_plugin.py").read_text(encoding="utf-8")
+        self.assertIn("class RosUiBridge(QObject)",operator)
+        self.assertIn("state_received.connect(self.state_cb)",operator)
+        self.assertIn('("/fleet/markers","/dynamic_obstacles/markers")',operator)
+        self.assertIn("Marker.DELETEALL",operator)
+        self.assertIn("readyReadStandardOutput.connect(self.drain_simulation_output)",operator)
     def test_python_and_ros_package_versions_match(self):
         package=ET.parse(os.path.join(ROOT,"package.xml")).getroot().findtext("version")
         setup=Path(ROOT,"setup.py").read_text(encoding="utf-8")

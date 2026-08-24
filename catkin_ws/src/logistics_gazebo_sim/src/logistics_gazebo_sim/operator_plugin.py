@@ -24,6 +24,8 @@ SCENE_DEFAULTS = {
   6: (-40.0,-40.0,40.0,20.0,12.0)}
 class PointBridge(QObject):
     point_received=Signal(float,float)
+class RosUiBridge(QObject):
+    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object)
 
 class OperatorPlugin(Plugin):
     def __init__(self, context):
@@ -72,7 +74,8 @@ class OperatorPlugin(Plugin):
         self.state.setObjectName("statusBadge");self.stage.setObjectName("statusBadge")
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
         sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
-        self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget)
+        self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
+        self.process.setProcessChannelMode(QProcess.MergedChannels);self.process.readyReadStandardOutput.connect(self.drain_simulation_output)
         self.simulation_stop_requested=False;self.simulation_start_pending=False
         self.process.started.connect(self.simulation_process_started)
         self.process.errorOccurred.connect(self.simulation_process_error)
@@ -85,13 +88,17 @@ class OperatorPlugin(Plugin):
         self.scene.currentIndexChanged.connect(self.update_defaults);self.start_sim.clicked.connect(self.launch_sim);self.stop_sim.clicked.connect(self.stop_simulation)
         self.pick_start.clicked.connect(lambda:self.begin_pick("start"));self.pick_goal.clicked.connect(lambda:self.begin_pick("goal"))
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
-        self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True);rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
+        self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True)
+        self.runtime_marker_pubs=[rospy.Publisher(topic,MarkerArray,queue_size=1,latch=True) for topic in ("/fleet/markers","/dynamic_obstacles/markers")]
+        rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
         self.formation.currentIndexChanged.connect(self.parameters_changed);self.avoidance_mode.currentIndexChanged.connect(self.parameters_changed)
-        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1)
-        rospy.Subscriber("/fleet/dynamic_risk",String,self.dynamic_risk_cb,queue_size=1)
+        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb)
+        rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1)
+        rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1)
         self.update_defaults()
     def update_defaults(self):
+        self.clear_runtime_markers()
         sx,sy,gx,gy,alt=SCENE_DEFAULTS[self.scene.currentData()]
         for widget,value in ((self.start_x,sx),(self.start_y,sy),(self.goal_x,gx),(self.goal_y,gy),(self.altitude,alt)):widget.setValue(value)
         QTimer.singleShot(50,self.publish_preview);self.schedule_analysis()
@@ -248,6 +255,10 @@ class OperatorPlugin(Plugin):
         self.publish_preview()
     def new_marker(self,mid,kind,ns):
         m=Marker();m.header.frame_id="world";m.header.stamp=rospy.Time.now();m.ns=ns;m.id=mid;m.type=kind;m.action=Marker.ADD;m.pose.orientation.w=1.0;return m
+    def clear_runtime_markers(self):
+        if not hasattr(self,"runtime_marker_pubs"):return
+        marker=self.new_marker(0,Marker.CUBE,"operator_cleanup");marker.action=Marker.DELETEALL;message=MarkerArray(markers=[marker])
+        for publisher in self.runtime_marker_pubs:publisher.publish(message)
     def publish_preview(self):
         if not hasattr(self,"preview_pub"):return
         arr=MarkerArray();clear=self.new_marker(0,Marker.CUBE,"clear");clear.action=Marker.DELETEALL;arr.markers.append(clear);mid=100
@@ -289,7 +300,7 @@ class OperatorPlugin(Plugin):
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
         algorithm,orca_mode,execution=self.avoidance_mode.currentData()
-        self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
+        self.clear_runtime_markers();self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
         px4_root=os.path.expanduser("~/PX4_Firmware")
@@ -304,6 +315,8 @@ class OperatorPlugin(Plugin):
             environment.insert(name,":".join(([current] if current else [])+paths))
         self.process.setProcessEnvironment(environment)
         self.process.start("setsid",["roslaunch"]+args)
+    def drain_simulation_output(self):
+        self.simulation_log_tail=(self.simulation_log_tail+bytes(self.process.readAllStandardOutput()))[-32768:]
     def simulation_process_started(self):
         self.state.setText("启动命令已提交，正在等待 Gazebo 与三机 PX4 就绪…")
     def simulation_process_error(self,_error):
@@ -313,6 +326,7 @@ class OperatorPlugin(Plugin):
         QMessageBox.critical(self.widget,"仿真启动失败",
             "无法启动 roslaunch：{}\n请检查 ROS 环境和启动日志。".format(self.process.errorString()))
     def simulation_process_finished(self,exit_code,_exit_status):
+        self.clear_runtime_markers()
         self.simulation_start_pending=False
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
         if self.simulation_stop_requested:
@@ -346,7 +360,7 @@ class OperatorPlugin(Plugin):
                 "[r]oslaunch.*three_uav_mission.launch"])==0:
             QProcess.execute("pkill",["-TERM","-f",
                 "[r]oslaunch.*three_uav_mission.launch"])
-        else:self.state.setText("三机仿真已停止")
+        else:self.clear_runtime_markers();self.state.setText("三机仿真已停止")
     def call(self,name):
         try:r=rospy.ServiceProxy(name,Trigger)();self.state.setText(r.message)
         except rospy.ServiceException as exc:QMessageBox.warning(self.widget,"\u670d\u52a1\u8c03\u7528\u5931\u8d25",str(exc))
