@@ -14,7 +14,7 @@
 4. OMPL PathSimplifier 的 reduceVertices、shortcutPath 和 smoothBSpline。
 5. TOPPRA 三维速度/加速度时间参数化。
 6. PX4/MAVROS 三机跟踪、投递与返航。
-7. `collective_offset` 闭环避障与 `orca3d` 影子模式，外加独立风险监测和安全回退。
+7. `collective_offset`、3D ORCA 与分布式 MPC 可插拔局部规划，外加独立风险监测和安全回退。
 
 障碍物按编队尺度进行水平 4.5 m、竖直 2.0 m 膨胀。状态边界为 x/y ±46 m、z 3~45 m。规划器允许通过爬升越过低障碍物，输出轨迹字段为 `[t,x,y,z]`。
 
@@ -34,7 +34,7 @@ OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线�
 
 ## 验证结果
 
-v0.4.2 统一基线通过 65 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已完成 Gazebo 三机受限闭环验证，并保留整队偏移与影子模式作为可切换方案。
+v0.4.3 统一基线通过 67 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已完成 Gazebo 三机受限闭环验证；分布式 MPC 已完成离线、不开桨数据流和 Gazebo 三机影子模式验证。
 
 七个场景均完成 OMPL 3D + TOPPRA 规划。典型场景 0：
 
@@ -46,9 +46,9 @@ v0.4.2 统一基线通过 65 项 Python 回归测试，`catkin build logistics_g
 
 场景 1 在 37 m 已高于主要障碍物，因此最优路径保持恒高；其余复杂低空场景会按需要爬升或侧向绕障。
 
-## v0.4.2 闭环边界
+## v0.4.3 算法边界
 
-ORCA 仅在 WARNING 且命令新鲜、车辆集合完整、动态净空、静态场景、地图边界、高度与机间距全部复核通过时接管。CRITICAL、超时、无解或约束失败均同步悬停；上位机可选择“整队偏移（稳定闭环）”“3D ORCA（影子模式）”或“3D ORCA（受限接管）”。
+ORCA 仅在 WARNING 且命令新鲜、车辆集合完整、动态净空、静态场景、地图边界、高度与机间距全部复核通过时接管。分布式 MPC 每机独立优化有限时域三维轨迹，并由独立安全检查复核；v0.4.3 仅显示影子预测，无解时回退 ORCA，再失败则悬停。
 
 ## 启动
 

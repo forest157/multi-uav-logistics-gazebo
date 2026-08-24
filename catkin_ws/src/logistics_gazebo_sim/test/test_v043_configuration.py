@@ -2,7 +2,7 @@
 import os,re,unittest,xml.etree.ElementTree as ET
 from pathlib import Path
 ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-class V042ConfigurationTest(unittest.TestCase):
+class V043ConfigurationTest(unittest.TestCase):
     def test_launch_exposes_and_routes_scalable_options(self):
         tree=ET.parse(os.path.join(ROOT,"launch","three_uav_mission.launch"))
         root=tree.getroot();args={node.attrib["name"]:node.attrib.get("default") for node in root.findall("arg")}
@@ -19,7 +19,7 @@ class V042ConfigurationTest(unittest.TestCase):
         package=ET.parse(os.path.join(ROOT,"package.xml")).getroot().findtext("version")
         setup=Path(ROOT,"setup.py").read_text(encoding="utf-8")
         self.assertIn("version='{}'".format(package),setup)
-        self.assertEqual(package,"0.4.2")
+        self.assertEqual(package,"0.4.3")
     def test_unified_package_readme_is_clean_utf8(self):
         text=Path(ROOT,"README.md").read_bytes().decode("utf-8")
         self.assertNotIn("\ufffd",text)

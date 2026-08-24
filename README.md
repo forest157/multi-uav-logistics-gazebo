@@ -18,7 +18,7 @@
 
 ## 当前版本
 
-当前稳定基线为 `v0.4.2`，`main` 使用统一单一 ROS 包。ORCA 已支持经过独立安全门约束的受限闭环接管，默认模式仍可选择稳定整队偏移或 ORCA 影子模式。
+当前稳定基线为 `v0.4.3`，`main` 使用统一单一 ROS 包。ORCA 支持经过独立安全门约束的受限闭环接管；分布式 MPC 已完成三机影子模式验证，但尚不接管飞控。
 
 ## 版本历史与后续计划
 
@@ -50,7 +50,7 @@ source /home/devuser/catkin_ws/devel/setup.bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover -s test -q
 ```
 
-当前统一基线应通过 61 项 Python 回归测试，并能成功执行 `catkin build logistics_gazebo_sim`。
+当前统一基线应通过 67 项 Python 回归测试，并能成功执行 `catkin build logistics_gazebo_sim`。
 
 ## 恢复历史版本
 
