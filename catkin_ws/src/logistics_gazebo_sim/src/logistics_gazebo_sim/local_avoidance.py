@@ -1,5 +1,6 @@
 """Pluggable local avoidance algorithms for scalable 3D fleets."""
 import math
+import multiprocessing as mp
 import time
 import warnings
 import numpy as np
@@ -207,14 +208,28 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
                         peer_position=references[peer][step_index];gap=float(np.linalg.norm(position-peer_position));cost+=5000.0*max(0.0,separation-gap)**2
                         nominal_relative=references[vehicle][step_index]-peer_position;actual_relative=position-peer_position;cost+=2.0*float(np.sum((actual_relative-nominal_relative)**2))
                 return cost
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore",RuntimeWarning)
-                result=minimize(objective,previous.ravel(),method="SLSQP",bounds=bounds,options={"maxiter":max_iterations,"ftol":1e-4})
-            positions,velocities,accelerations=rollout(result.x);elapsed_ms=1000.0*(time.perf_counter()-start_clock)
-            success=bool((result.success or int(result.status)==8) and np.all(np.isfinite(positions)) and np.isfinite(result.fun));all_success=all_success and success
+            timeout_s=float(options.get("mpc_vehicle_timeout_s",0.35))
+            def solve_isolated(connection):
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore",RuntimeWarning)
+                        solved=minimize(objective,previous.ravel(),method="SLSQP",bounds=bounds,options={"maxiter":max_iterations,"ftol":1e-4})
+                    connection.send({"x":solved.x,"success":bool(solved.success or int(solved.status)==8),"status":int(solved.status),"message":str(solved.message),"iterations":int(solved.nit),"fun":float(solved.fun)})
+                except BaseException as error:connection.send({"error":"{}: {}".format(type(error).__name__,error)})
+                finally:connection.close()
+            def launch_solver():
+                parent_pipe,child_pipe=mp.Pipe(False);process=mp.get_context("fork").Process(target=solve_isolated,args=(child_pipe,));process.daemon=True;process.start();child_pipe.close();process.join(timeout_s)
+                if process.is_alive():process.terminate();process.join(0.1);value={"error":"vehicle solve timeout after {:.3f}s".format(timeout_s)}
+                elif parent_pipe.poll():value=parent_pipe.recv()
+                else:value={"error":"vehicle solver exited with code {}".format(process.exitcode)}
+                parent_pipe.close();return value
+            solver=launch_solver();retried=False
+            if solver.get("error") and "timeout" not in solver["error"]:solver=launch_solver();retried=True
+            solution=np.asarray(solver.get("x",previous.ravel()),dtype=float);positions,velocities,accelerations=rollout(solution);elapsed_ms=1000.0*(time.perf_counter()-start_clock)
+            success=bool(not solver.get("error") and solver.get("success") and np.all(np.isfinite(positions)) and np.isfinite(solver.get("fun",float("nan"))));all_success=all_success and success
             trajectory=[[round(float(query[index]),3)]+[round(float(axis),4) for axis in positions[index]] for index in range(steps+1)]
-            trajectories.append(trajectory);solve_times.append(elapsed_ms);iterations.append(int(result.nit))
-            commands.append({"vehicle_id":"uav{}".format(vehicle),"velocity":[round(float(axis),4) for axis in velocities[0]],"preferred_velocity":[round(float(axis),4) for axis in initial_velocities[vehicle]],"acceleration":[round(float(axis),4) for axis in accelerations[0]],"solver_success":success,"solver_status":int(result.status),"solver_message":str(result.message),"iterations":int(result.nit),"solve_time_ms":round(elapsed_ms,3)})
+            trajectories.append(trajectory);solve_times.append(elapsed_ms);iterations.append(int(solver.get("iterations",0)))
+            commands.append({"vehicle_id":"uav{}".format(vehicle),"velocity":[round(float(axis),4) for axis in velocities[0]],"preferred_velocity":[round(float(axis),4) for axis in initial_velocities[vehicle]],"acceleration":[round(float(axis),4) for axis in accelerations[0]],"solver_success":success,"solver_status":int(solver.get("status",-2)),"solver_message":solver.get("error",solver.get("message","unknown solver result")),"iterations":int(solver.get("iterations",0)),"solve_time_ms":round(elapsed_ms,3),"solver_retried":retried})
         reports=[assess_timed_path(path,checked,horizon=steps*dt,warning_clearance=required_clearance) for path in trajectories]
         dynamic_safe=all(report["minimum_clearance_m"] is None or report["minimum_clearance_m"]>=required_clearance for report in reports)
         fleet=assess_fleet_separation(trajectories,horizon=steps*dt,minimum_separation=separation)
@@ -222,10 +237,12 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
         viable=all_success and dynamic_safe and fleet["safe"] and static["feasible"]
         rejections={}
         if not all_success:rejections["MPC_SOLVER_FAILURE"]=sum(1 for command in commands if not command["solver_success"])
+        timeout_count=sum(1 for command in commands if "timeout" in command["solver_message"])
+        if timeout_count:rejections["MPC_SOLVER_TIMEOUT"]=timeout_count
         if not dynamic_safe:rejections["DYNAMIC_CLEARANCE"]=1
         if not fleet["safe"]:rejections["VEHICLE_SEPARATION"]=1
         if not static["feasible"]:rejections[static.get("error_code") or "STATIC_CONSTRAINT"]=1
-        return {"viable":bool(viable),"algorithm":self.name,"command_type":self.command_type,"vehicle_count":count,"commands":commands,"trajectories":trajectories,"constraints_satisfied":bool(dynamic_safe and fleet["safe"] and static["feasible"]),"static_validation":static,"fleet_separation":fleet,"dynamic_reports":reports,"solve_time_ms":{"total":round(sum(solve_times),3),"maximum":round(max(solve_times),3),"mean":round(sum(solve_times)/len(solve_times),3)},"iterations":{"maximum":max(iterations),"mean":round(sum(iterations)/len(iterations),2)},"reason":"distributed MPC shadow trajectory generated" if viable else "distributed MPC failed solver or independent safety validation","shadow_mode":True,"requires_external_safety_gate":True,"rejection_summary":rejections}
+        return {"viable":bool(viable),"algorithm":self.name,"command_type":self.command_type,"vehicle_count":count,"commands":commands,"trajectories":trajectories,"constraints_satisfied":bool(dynamic_safe and fleet["safe"] and static["feasible"]),"static_validation":static,"fleet_separation":fleet,"dynamic_reports":reports,"solve_time_ms":{"total":round(sum(solve_times),3),"maximum":round(max(solve_times),3),"mean":round(sum(solve_times)/len(solve_times),3)},"iterations":{"maximum":max(iterations),"mean":round(sum(iterations)/len(iterations),2)},"reason":"distributed MPC shadow trajectory generated" if viable else "distributed MPC failed solver or independent safety validation","shadow_mode":True,"requires_external_safety_gate":True,"solver_isolated":True,"rejection_summary":rejections}
 
 
 class Orca3DPlanner(LocalAvoidancePlanner):

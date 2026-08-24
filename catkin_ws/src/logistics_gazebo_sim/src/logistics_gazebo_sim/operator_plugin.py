@@ -377,7 +377,7 @@ class OperatorPlugin(Plugin):
                 timing=avoidance.get("solve_time_ms") or {};text+=" | MPC影子轨迹 {} 架 | 求解 {} ms".format(len(avoidance.get("trajectories") or []),timing.get("total","-"))
             elif avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
             elif level in ("WARNING","CRITICAL"):
-                summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}
+                summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","MPC_SOLVER_FAILURE":"MPC 求解失败","MPC_SOLVER_TIMEOUT":"MPC 求解超时","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}
                 reasons="、".join("{}×{}".format(names.get(key,key),count) for key,count in sorted(summary.items()))
                 text+=" | 无安全候选，保持悬停"+("（{}）".format(reasons) if reasons else "")
             self.dynamic_risk.setText(text)

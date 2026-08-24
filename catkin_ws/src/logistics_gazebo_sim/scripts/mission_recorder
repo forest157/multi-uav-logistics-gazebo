@@ -15,7 +15,7 @@ class Recorder:
         header=["ros_time","state","stage","phase","progress",
             "dynamic_action","dynamic_risk","speed_scale","avoidance_state",
             "avoidance_offset_x","avoidance_offset_y","avoidance_offset_z",
-            "avoidance_failure","avoidance_algorithm","orca_max_command_speed_mps","mpc_viable","mpc_total_solve_ms","mpc_max_solve_ms","predicted_separation_m","dynamic_clearance_m",
+            "avoidance_failure","avoidance_algorithm","orca_max_command_speed_mps","mpc_viable","mpc_total_solve_ms","mpc_max_solve_ms","mpc_solver_retries","predicted_separation_m","dynamic_clearance_m",
             "dynamic_time_to_conflict_s","safety_level","safety_message",
             "min_separation_m","min_clearance_m","max_tracking_error_m"]
         for i in range(self.count):header += ["uav{}_x".format(i),"uav{}_y".format(i),"uav{}_z".format(i)]
@@ -43,12 +43,13 @@ class Recorder:
         max_orca_speed=max([math.sqrt(sum(float(axis)**2 for axis in value)) for value in velocities] or [0.0])
         avoidance=self.dynamic.get("avoidance") or {};mpc_timing=avoidance.get("solve_time_ms") or {}
         mpc_viable=avoidance.get("viable","") if avoidance.get("algorithm")=="distributed_mpc" else ""
+        mpc_retries=sum(1 for command in avoidance.get("commands",[]) if command.get("solver_retried")) if avoidance.get("algorithm")=="distributed_mpc" else ""
         row=[rospy.Time.now().to_sec(),self.state.get("state",""),
              self.state.get("stage",""),self.state.get("phase",""),
              self.state.get("progress",""),self.state.get("dynamic_action",""),
              self.state.get("dynamic_risk",""),self.state.get("speed_scale",""),
              execution.get("state",""),offset[0],offset[1],offset[2],
-             execution.get("failure",""),execution.get("algorithm","") or avoidance.get("algorithm",""),max_orca_speed,mpc_viable,mpc_timing.get("total",""),mpc_timing.get("maximum",""),separation.get("minimum_separation_m",""),
+             execution.get("failure",""),execution.get("algorithm","") or avoidance.get("algorithm",""),max_orca_speed,mpc_viable,mpc_timing.get("total",""),mpc_timing.get("maximum",""),mpc_retries,separation.get("minimum_separation_m",""),
              self.dynamic.get("minimum_clearance_m",""),
              self.dynamic.get("time_to_conflict_s","")]+self.safety
         for p in self.poses:row += [p.x,p.y,p.z] if p else ["","",""]

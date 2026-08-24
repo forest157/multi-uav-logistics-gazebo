@@ -86,6 +86,12 @@ class LocalAvoidanceTest(unittest.TestCase):
         self.assertTrue(result["fleet_separation"]["safe"])
         self.assertLess(result["solve_time_ms"]["total"],1500.0)
 
+    def test_distributed_mpc_timeout_is_contained(self):
+        result=DistributedMpcPlanner().plan(self.paths(3),[],mpc_vehicle_timeout_s=0.0001)
+        self.assertFalse(result["viable"]);self.assertTrue(result["solver_isolated"])
+        self.assertIn("MPC_SOLVER_TIMEOUT",result["rejection_summary"])
+
+
     def test_distributed_mpc_rejects_physically_late_avoidance(self):
         obstacle={"id":"bird","position":[1,0,8],"velocity":[0,0,0],"radius":1.0,"height":1.0}
         result=DistributedMpcPlanner().plan([[[0,0,0,8],[3,6,0,8]]],[obstacle],mpc_steps=4,mpc_dt=0.4)
