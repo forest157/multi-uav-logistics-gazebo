@@ -35,6 +35,7 @@
     <param name="warning_clearance_m" value="8.0"/>
     <param name="max_deceleration_mps2" value="1.0"/><param name="control_delay_s" value="0.6"/>
     <param name="braking_margin_s" value="0.4"/><param name="critical_ttc_min_s" value="1.0"/><param name="critical_ttc_max_s" value="8.0"/>
+    <param name="risk_release_delay_s" value="0.8"/>
     <param name="local_avoidance_algorithm" value="$(arg local_avoidance_algorithm)"/>
   </node>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim"

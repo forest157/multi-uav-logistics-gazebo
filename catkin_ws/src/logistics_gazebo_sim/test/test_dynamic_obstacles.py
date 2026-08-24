@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from logistics_gazebo_sim.dynamic_obstacles import (
-    DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_fleet_separation, assess_timed_path, braking_ttc_threshold, interpolate_timed_path,
+    DynamicObstacleError, DynamicSafetyResponse, RiskLevelHysteresis, AvoidanceExecution, assess_fleet_separation, assess_timed_path, braking_ttc_threshold, interpolate_timed_path,
     obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path, validate_static_paths)
 
 
@@ -60,6 +60,16 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertEqual(response.update(levels[0],0.0)["action"],"SLOW")
         self.assertEqual(response.update(levels[3],1.0)["action"],"HOLD")
         self.assertEqual(response.update("SAFE",2.0)["action"],"HOLD")
+
+    def test_risk_hysteresis_filters_warning_boundary_chatter(self):
+        levels=RiskLevelHysteresis(release_delay=0.8)
+        self.assertEqual(levels.update("WARNING",0.0),"WARNING")
+        self.assertEqual(levels.update("SAFE",0.2),"WARNING")
+        self.assertEqual(levels.update("WARNING",0.3),"WARNING")
+        self.assertEqual(levels.update("SAFE",0.4),"WARNING")
+        self.assertEqual(levels.update("SAFE",1.3),"SAFE")
+        self.assertEqual(levels.update("CRITICAL",1.4),"CRITICAL")
+        self.assertEqual(levels.update("WARNING",1.5),"CRITICAL")
 
     def test_vertical_separation_is_safe(self):
         path = [[0.0, 0.0, 12.0, 12.0], [10.0, 10.0, 12.0, 12.0]]

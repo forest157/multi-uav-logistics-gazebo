@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim.dynamic_obstacles import assess_fleet_separation, assess_timed_path, prediction_path
+from logistics_gazebo_sim.dynamic_obstacles import RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, prediction_path
 
 
 class DynamicRiskMonitor:
@@ -23,6 +23,7 @@ class DynamicRiskMonitor:
         self.braking_margin=float(rospy.get_param("~braking_margin_s",0.4))
         self.critical_ttc_min=float(rospy.get_param("~critical_ttc_min_s",1.0))
         self.critical_ttc_max=float(rospy.get_param("~critical_ttc_max_s",self.horizon))
+        self.level_hysteresis=RiskLevelHysteresis(float(rospy.get_param("~risk_release_delay_s",0.8)))
         self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
         self.orca_required_clearance = float(rospy.get_param("~orca_required_clearance_m", 0.5))
         self.local_avoidance_algorithm = str(rospy.get_param(
@@ -190,6 +191,7 @@ class DynamicRiskMonitor:
         separation=assess_fleet_separation(
             paths,horizon=self.horizon,minimum_separation=self.minimum_separation)
         if not separation["safe"]:level="CRITICAL"
+        level=self.level_hysteresis.update(level,rospy.get_time())
         if level in ("WARNING","CRITICAL"):
             avoidance=self.request_plan(paths)
         else:

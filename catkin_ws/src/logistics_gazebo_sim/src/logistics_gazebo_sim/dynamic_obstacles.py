@@ -194,6 +194,22 @@ class DynamicSafetyResponse:
                 "risk_level": level}
 
 
+class RiskLevelHysteresis:
+    """Promote risk immediately and require stable time before demotion."""
+    def __init__(self,release_delay=0.8):
+        self.release_delay=float(release_delay)
+        if self.release_delay<0.0:raise DynamicObstacleError("risk release delay must be non-negative")
+        self.reset()
+    def reset(self):self.level="SAFE";self.lower_level=None;self.lower_since=None
+    def update(self,level,now):
+        level=str(level).upper();now=float(now);order={"SAFE":0,"WARNING":1,"CRITICAL":2}
+        if level not in order:return level
+        if order[level]>=order[self.level]:self.level=level;self.lower_level=None;self.lower_since=None
+        elif self.lower_level!=level:self.lower_level=level;self.lower_since=now
+        elif now-self.lower_since>=self.release_delay:self.level=level;self.lower_level=None;self.lower_since=None
+        return self.level
+
+
 def shifted_path(path, offset):
     """Blend a collective xyz offset during the first 40 percent of the path."""
     values = np.asarray(path, dtype=float).copy()

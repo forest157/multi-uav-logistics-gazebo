@@ -115,14 +115,20 @@ class MissionPlayer:
             self.avoidance_command={"state":"IDLE","action":"NONE","algorithm":"orca3d",
                                     "failure":None,"velocities":None}
             if level=="WARNING" and self.orca_control_mode=="limited":
-                try:
+                pending=bool((avoidance.get("rejection_summary") or {}).get("PLANNER_PENDING"))
+                if pending:
+                    self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure="ORCA planner pending"
+                    self.dynamic_action,self.dynamic_scale="SLOW",min(self.dynamic_scale,0.35)
+                    self.avoidance_command.update({"state":"WAITING","action":"SLOW","failure":self.orca_failure})
+                else:
+                  try:
                     dt=0.2 if self.last_orca_update is None else max(0.02,now-self.last_orca_update)
                     self.orca_velocities=self.orca_gate.condition(avoidance,now,dt)
                     self.last_orca_update=now;self.orca_plan_stamp=float(avoidance["stamp"]);self.orca_failure=None
                     self.dynamic_action,self.dynamic_scale="ORCA",0.35
                     self.avoidance_command.update({"state":"ACTIVE","action":"ORCA",
                         "velocities":self.orca_velocities,"plan_stamp":self.orca_plan_stamp})
-                except (DynamicObstacleError,TypeError,ValueError) as error:
+                  except (DynamicObstacleError,TypeError,ValueError) as error:
                     self.orca_velocities=None;self.orca_failure=str(error)
                     self.dynamic_action,self.dynamic_scale="HOLD",0.0
                     self.avoidance_command.update({"state":"HOLD","action":"HOLD","failure":self.orca_failure})
