@@ -49,6 +49,10 @@ source ~/catkin_ws/devel/setup.bash
 rosrun logistics_gazebo_sim benchmark_local_avoidance --cases 30 --json /tmp/avoidance.json --csv /tmp/avoidance.csv
 ```
 
+## 运行环境故障记录
+
+压力测试期间曾出现 SciPy `double free`、NumPy 随机类型错误以及纯 Python `copy.deepcopy` 段错误。逐逻辑 CPU 运行 20 万次纯 Python 分配测试后，CPU 8、9 稳定失败，其余 30 个逻辑 CPU 全部通过。容器已临时限制到 `0-7,10-31`；限制后连续 10 轮、每轮 50 万次健康检查全部通过，工程测试与 30 场景基准恢复稳定。该问题属于当前宿主机 CPU／平台稳定性，不应通过放宽算法安全门掩盖。宿主机后续应检查 BIOS、微码、超频／降压、内存和 CPU 稳定性。
+
 ## 下一步
 
 在 Gazebo 同一鸟类轨迹中分别回放三种算法，补充任务成功率、实际净空、实际机间距、跟踪误差和任务耗时。MPC 只有在连续多轮影子模式可行率、超时率和实际安全指标达到门槛后，才进入受限闭环设计。

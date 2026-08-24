@@ -231,7 +231,9 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
             def launch_solver():
                 parent_pipe,child_pipe=mp.Pipe(False);process=mp.get_context("fork").Process(target=solve_isolated,args=(child_pipe,));process.daemon=True;process.start();child_pipe.close();process.join(timeout_s)
                 if process.is_alive():process.terminate();process.join(0.1);value={"error":"vehicle solve timeout after {:.3f}s".format(timeout_s)}
-                elif parent_pipe.poll():value=parent_pipe.recv()
+                elif parent_pipe.poll():
+                    try:value=parent_pipe.recv()
+                    except EOFError:value={"error":"vehicle solver pipe closed before result"}
                 else:value={"error":"vehicle solver exited with code {}".format(process.exitcode)}
                 parent_pipe.close();return value
             solver=launch_solver();retried=False
