@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from logistics_gazebo_sim.dynamic_obstacles import (
-    DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_fleet_separation, assess_timed_path, interpolate_timed_path,
+    DynamicObstacleError, DynamicSafetyResponse, AvoidanceExecution, assess_fleet_separation, assess_timed_path, braking_ttc_threshold, interpolate_timed_path,
     obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path, validate_static_paths)
 
 
@@ -42,6 +42,24 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertEqual(early["level"],"WARNING");self.assertFalse(early["imminent_conflict"])
         self.assertEqual(imminent["level"],"CRITICAL");self.assertTrue(imminent["imminent_conflict"])
         with self.assertRaises(DynamicObstacleError):assess_timed_path(path,[self.obstacle()],critical_time_threshold=-0.1)
+
+    def test_braking_ttc_uses_speed_deceleration_and_delay(self):
+        self.assertEqual(braking_ttc_threshold(2.0,1.0,0.6,0.4),3.0)
+        self.assertEqual(braking_ttc_threshold(0.0,1.0,0.6,0.4),1.0)
+        self.assertEqual(braking_ttc_threshold(20.0,1.0,0.6,0.4,1.0,8.0),8.0)
+        with self.assertRaises(DynamicObstacleError):braking_ttc_threshold(2.0,0.0)
+
+    def test_rolling_collision_stages_slow_then_collective_hold(self):
+        path=[[0.0,0.0,0.0,5.0],[10.0,10.0,0.0,5.0]]
+        levels=[]
+        for y in (-7.0,-6.0,-5.0,-4.0,-3.0):
+            report=assess_timed_path(path,[self.obstacle(position=(5.0,y,5.0))],horizon=10.0,warning_clearance=8.0,critical_time_threshold=3.0)
+            levels.append(report["level"])
+        self.assertEqual(levels,["WARNING","WARNING","WARNING","CRITICAL","CRITICAL"])
+        response=DynamicSafetyResponse(warning_scale=0.35,release_delay=2.0)
+        self.assertEqual(response.update(levels[0],0.0)["action"],"SLOW")
+        self.assertEqual(response.update(levels[3],1.0)["action"],"HOLD")
+        self.assertEqual(response.update("SAFE",2.0)["action"],"HOLD")
 
     def test_vertical_separation_is_safe(self):
         path = [[0.0, 0.0, 12.0, 12.0], [10.0, 10.0, 12.0, 12.0]]

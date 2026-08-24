@@ -5,7 +5,7 @@ import math
 
 import rospy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header, String
 
 from logistics_gazebo_sim.dynamic_obstacles import assess_fleet_separation, assess_timed_path, prediction_path
@@ -18,9 +18,11 @@ class DynamicRiskMonitor:
         self.horizon = float(rospy.get_param("~horizon_s", 8.0))
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
-        self.critical_ttc = float(rospy.get_param("~critical_ttc_s", 3.0))
-        if self.critical_ttc<0.0:
-            raise ValueError("critical_ttc_s must be non-negative")
+        self.max_deceleration=float(rospy.get_param("~max_deceleration_mps2",1.0))
+        self.control_delay=float(rospy.get_param("~control_delay_s",0.6))
+        self.braking_margin=float(rospy.get_param("~braking_margin_s",0.4))
+        self.critical_ttc_min=float(rospy.get_param("~critical_ttc_min_s",1.0))
+        self.critical_ttc_max=float(rospy.get_param("~critical_ttc_max_s",self.horizon))
         self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
         self.orca_required_clearance = float(rospy.get_param("~orca_required_clearance_m", 0.5))
         self.local_avoidance_algorithm = str(rospy.get_param(
@@ -32,6 +34,7 @@ class DynamicRiskMonitor:
         self.origins = [(sx + (index-middle)*spacing, sy)
                         for index in range(self.count)]
         self.poses = [None] * self.count
+        self.velocities = [None] * self.count
         self.targets = [None] * self.count
         self.obstacles = []
         self.last_obstacle_stamp = None
@@ -46,6 +49,8 @@ class DynamicRiskMonitor:
         for index in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),
                              PoseStamped, self.pose_cb, callback_args=index, queue_size=1)
+            rospy.Subscriber("/uav{}/mavros/local_position/velocity_local".format(index),
+                             TwistStamped,self.velocity_cb,callback_args=index,queue_size=1)
             rospy.Subscriber("/uav{}/nominal_target_pose".format(index), PoseStamped,
                              self.target_cb, callback_args=index, queue_size=1)
         rospy.Subscriber("/dynamic_obstacles/state", String,
@@ -64,6 +69,16 @@ class DynamicRiskMonitor:
 
     def target_cb(self, message, index):
         self.targets[index] = message.pose.position
+
+    def velocity_cb(self,message,index):
+        value=message.twist.linear;self.velocities[index]=(value.x,value.y,value.z)
+
+    def critical_ttc_threshold(self):
+        from logistics_gazebo_sim.dynamic_obstacles import braking_ttc_threshold
+        speeds=[math.sqrt(sum(axis*axis for axis in value)) for value in self.velocities if value is not None]
+        speed=max(speeds) if speeds else self.speed
+        return braking_ttc_threshold(speed,self.max_deceleration,self.control_delay,
+            self.braking_margin,self.critical_ttc_min,self.critical_ttc_max)
 
     def obstacles_cb(self, message):
         try:
@@ -161,12 +176,13 @@ class DynamicRiskMonitor:
                     "vehicle_reports": [], "obstacle_count": len(self.obstacles)}
         reports = []
         paths=self.paths_for_report()
+        critical_ttc=self.critical_ttc_threshold()
         order = {"SAFE": 0, "WARNING": 1, "CRITICAL": 2}
         for index in range(self.count):
             value = assess_timed_path(
                 paths[index], self.obstacles, horizon=self.horizon,
                 warning_clearance=self.warning,
-                critical_time_threshold=self.critical_ttc)
+                critical_time_threshold=critical_ttc)
             value["vehicle_id"] = "uav{}".format(index)
             reports.append(value)
         level = max((value["level"] for value in reports),
@@ -189,7 +205,7 @@ class DynamicRiskMonitor:
                 "nearest_vehicle": nearest["vehicle_id"],
                 "minimum_clearance_m": nearest["minimum_clearance_m"],
                 "time_to_conflict_s": nearest["time_to_conflict_s"],
-                "critical_ttc_s":self.critical_ttc,
+                "critical_ttc_s":critical_ttc,
                 "fleet_separation":separation,
                 "local_avoidance_algorithm":self.local_avoidance_algorithm,
                 "avoidance":avoidance}

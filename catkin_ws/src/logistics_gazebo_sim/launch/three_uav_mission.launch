@@ -33,7 +33,8 @@
     <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
     <param name="horizon_s" value="8.0"/><param name="minimum_separation_m" value="3.0"/>
     <param name="warning_clearance_m" value="8.0"/>
-    <param name="critical_ttc_s" value="3.0"/>
+    <param name="max_deceleration_mps2" value="1.0"/><param name="control_delay_s" value="0.6"/>
+    <param name="braking_margin_s" value="0.4"/><param name="critical_ttc_min_s" value="1.0"/><param name="critical_ttc_max_s" value="8.0"/>
     <param name="local_avoidance_algorithm" value="$(arg local_avoidance_algorithm)"/>
   </node>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim"

@@ -95,6 +95,17 @@ def obstacle_clearance(point, obstacle, seconds, vehicle_radius=1.2,
     return horizontal
 
 
+def braking_ttc_threshold(speed,max_deceleration,control_delay=0.6,
+                          safety_margin=0.4,minimum=1.0,maximum=8.0):
+    """Return the fleet hold threshold from speed, braking and latency."""
+    values=(speed,max_deceleration,control_delay,safety_margin,minimum,maximum)
+    if any(not np.isfinite(float(value)) for value in values):raise DynamicObstacleError("braking TTC inputs must be finite")
+    speed,max_deceleration,control_delay,safety_margin,minimum,maximum=map(float,values)
+    if speed<0.0 or max_deceleration<=0.0 or min(control_delay,safety_margin,minimum)<0.0 or maximum<minimum:
+        raise DynamicObstacleError("braking TTC limits are invalid")
+    return round(max(minimum,min(maximum,control_delay+speed/max_deceleration+safety_margin)),3)
+
+
 def assess_timed_path(path, obstacles, horizon=8.0, sample_period=0.2,
                       vehicle_radius=1.2, vehicle_half_height=0.6,
                       safety_buffer=0.5, warning_clearance=2.0,
