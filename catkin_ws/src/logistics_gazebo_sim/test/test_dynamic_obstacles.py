@@ -35,6 +35,14 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertEqual(report["obstacle_id"], "crossing_1")
         self.assertIsNotNone(report["time_to_conflict_s"])
 
+    def test_future_collision_warns_before_braking_window(self):
+        path = [[0.0, 0.0, 0.0, 5.0], [10.0, 10.0, 0.0, 5.0]]
+        early=assess_timed_path(path,[self.obstacle()],horizon=10.0,critical_time_threshold=1.0)
+        imminent=assess_timed_path(path,[self.obstacle()],horizon=10.0,critical_time_threshold=10.0)
+        self.assertEqual(early["level"],"WARNING");self.assertFalse(early["imminent_conflict"])
+        self.assertEqual(imminent["level"],"CRITICAL");self.assertTrue(imminent["imminent_conflict"])
+        with self.assertRaises(DynamicObstacleError):assess_timed_path(path,[self.obstacle()],critical_time_threshold=-0.1)
+
     def test_vertical_separation_is_safe(self):
         path = [[0.0, 0.0, 12.0, 12.0], [10.0, 10.0, 12.0, 12.0]]
         report = assess_timed_path(path, [self.obstacle()], horizon=10.0)

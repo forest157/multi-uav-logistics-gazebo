@@ -18,6 +18,9 @@ class DynamicRiskMonitor:
         self.horizon = float(rospy.get_param("~horizon_s", 8.0))
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
+        self.critical_ttc = float(rospy.get_param("~critical_ttc_s", 3.0))
+        if self.critical_ttc<0.0:
+            raise ValueError("critical_ttc_s must be non-negative")
         self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
         self.orca_required_clearance = float(rospy.get_param("~orca_required_clearance_m", 0.5))
         self.local_avoidance_algorithm = str(rospy.get_param(
@@ -162,7 +165,8 @@ class DynamicRiskMonitor:
         for index in range(self.count):
             value = assess_timed_path(
                 paths[index], self.obstacles, horizon=self.horizon,
-                warning_clearance=self.warning)
+                warning_clearance=self.warning,
+                critical_time_threshold=self.critical_ttc)
             value["vehicle_id"] = "uav{}".format(index)
             reports.append(value)
         level = max((value["level"] for value in reports),
@@ -185,6 +189,7 @@ class DynamicRiskMonitor:
                 "nearest_vehicle": nearest["vehicle_id"],
                 "minimum_clearance_m": nearest["minimum_clearance_m"],
                 "time_to_conflict_s": nearest["time_to_conflict_s"],
+                "critical_ttc_s":self.critical_ttc,
                 "fleet_separation":separation,
                 "local_avoidance_algorithm":self.local_avoidance_algorithm,
                 "avoidance":avoidance}

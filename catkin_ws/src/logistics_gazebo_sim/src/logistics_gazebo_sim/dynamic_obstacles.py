@@ -97,7 +97,8 @@ def obstacle_clearance(point, obstacle, seconds, vehicle_radius=1.2,
 
 def assess_timed_path(path, obstacles, horizon=8.0, sample_period=0.2,
                       vehicle_radius=1.2, vehicle_half_height=0.6,
-                      safety_buffer=0.5, warning_clearance=2.0):
+                      safety_buffer=0.5, warning_clearance=2.0,
+                      critical_time_threshold=None):
     """Assess a vehicle path against constant-velocity obstacle predictions."""
     checked = [validate_obstacle(value) for value in obstacles]
     if not checked:
@@ -123,7 +124,10 @@ def assess_timed_path(path, obstacles, horizon=8.0, sample_period=0.2,
                 critical = (item["id"], seconds, point.tolist())
             if clearance <= 0.0 and first_conflict is None:
                 first_conflict = seconds
-    if minimum <= 0.0:
+    if critical_time_threshold is not None and float(critical_time_threshold)<0.0:
+        raise DynamicObstacleError("critical time threshold must be non-negative")
+    imminent=(first_conflict is not None and (critical_time_threshold is None or first_conflict<=float(critical_time_threshold)))
+    if minimum <= 0.0 and imminent:
         level = "CRITICAL"
     elif minimum <= float(warning_clearance):
         level = "WARNING"
@@ -137,6 +141,7 @@ def assess_timed_path(path, obstacles, horizon=8.0, sample_period=0.2,
         "obstacle_id": critical[0],
         "critical_time_s": round(float(critical[1]), 3),
         "critical_position": [round(float(v), 3) for v in critical[2]],
+        "imminent_conflict": bool(imminent),
     }
 
 
