@@ -34,7 +34,7 @@ OctoMap 和 Navigation 已安装用于后续传感器在线地图/二维基线�
 
 ## 验证结果
 
-v0.4.4 统一基线通过 84 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已接入实时制动 TTC、规划等待和风险迟滞；分布式 MPC 完成统一影子对比，但仍不接管飞控。
+v0.4.5 稳定基线通过 84 项 Python 回归测试，`catkin build logistics_gazebo_sim` 构建成功。ORCA 已接入实时制动 TTC、规划等待和风险迟滞；分布式 MPC 完成统一影子对比，但仍不接管飞控。
 
 七个场景均完成 OMPL 3D + TOPPRA 规划。典型场景 0：
 
