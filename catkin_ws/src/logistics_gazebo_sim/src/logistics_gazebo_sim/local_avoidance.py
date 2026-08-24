@@ -181,6 +181,7 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
             starts.append(position);initial_velocities.append(_clamp(velocity,max_speed))
         warm_enabled=bool(options.get("mpc_warm_start",True));warm_limit=float(options.get("mpc_warm_start_max_displacement",max(3.0,3.0*max_speed*dt)))
         warm_valid=(warm_enabled and self._warm_shape==(count,steps) and self._warm_starts is not None and max(float(np.linalg.norm(starts[index]-self._warm_starts[index])) for index in range(count))<=warm_limit)
+        total_budget_s=float(options.get("mpc_total_timeout_s",0.45));plan_deadline=time.perf_counter()+total_budget_s
         trajectories=[];commands=[];solve_times=[];iterations=[];all_success=True;next_warm=[];warm_used=[]
         bounds=[]
         for _ in range(steps):bounds.extend([(-max_acc,max_acc),(-max_acc,max_acc),(-max_vertical_acc,max_vertical_acc)])
@@ -218,7 +219,7 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
             use_warm=bool(warm_valid and objective(previous.ravel())<=objective(cold.ravel()))
             if not use_warm:previous=cold.copy()
             warm_used.append(use_warm)
-            timeout_s=float(options.get("mpc_vehicle_timeout_s",0.35))
+            vehicle_timeout_s=float(options.get("mpc_vehicle_timeout_s",0.35));timeout_s=max(0.001,min(vehicle_timeout_s,plan_deadline-time.perf_counter()))
             def solve_isolated(connection):
                 try:
                     with warnings.catch_warnings():
@@ -234,7 +235,9 @@ class DistributedMpcPlanner(LocalAvoidancePlanner):
                 else:value={"error":"vehicle solver exited with code {}".format(process.exitcode)}
                 parent_pipe.close();return value
             solver=launch_solver();retried=False
-            if solver.get("error") and "timeout" not in solver["error"]:solver=launch_solver();retried=True
+            remaining=plan_deadline-time.perf_counter()
+            if solver.get("error") and "timeout" not in solver["error"] and remaining>0.005:
+                timeout_s=max(0.001,min(vehicle_timeout_s,remaining));solver=launch_solver();retried=True
             solution=np.asarray(solver.get("x",previous.ravel()),dtype=float);positions,velocities,accelerations=rollout(solution);elapsed_ms=1000.0*(time.perf_counter()-start_clock)
             success=bool(not solver.get("error") and solver.get("success") and np.all(np.isfinite(positions)) and np.isfinite(solver.get("fun",float("nan"))));all_success=all_success and success
             trajectory=[[round(float(query[index]),3)]+[round(float(axis),4) for axis in positions[index]] for index in range(steps+1)]

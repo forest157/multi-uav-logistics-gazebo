@@ -6,6 +6,8 @@
 
 当前发布验收记录：[`v0.4.3 分布式 MPC 影子模式`](v043_distributed_mpc_shadow/README.md)。前一版本记录：[`v0.4.2 ORCA 受限闭环接管`](v042_orca_limited_control/README.md)。
 
+当前开发记录：[`v0.4.4 局部避障鲁棒性与算法对比`](v044_algorithm_comparison/README.md)。
+
 ## 算法链路
 
 该实验线验证并引入了以下算法链路：

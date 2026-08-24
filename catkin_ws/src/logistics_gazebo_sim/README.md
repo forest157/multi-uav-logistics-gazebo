@@ -50,6 +50,14 @@ v0.4.3 统一基线通过 67 项 Python 回归测试，`catkin build logistics_g
 
 ORCA 仅在 WARNING 且命令新鲜、车辆集合完整、动态净空、静态场景、地图边界、高度与机间距全部复核通过时接管。分布式 MPC 每机独立优化有限时域三维轨迹，并由独立安全检查复核；v0.4.3 仅显示影子预测，无解时回退 ORCA，再失败则悬停。
 
+## 离线算法对比
+
+```bash
+rosrun logistics_gazebo_sim benchmark_local_avoidance --cases 30 --json /tmp/avoidance.json --csv /tmp/avoidance.csv
+```
+
+输出整队偏移、3D ORCA 和分布式 MPC 的统一可行率、耗时、安全距离、轨迹偏差、平滑度和能耗代理。
+
 ## 启动
 
 ```bash
