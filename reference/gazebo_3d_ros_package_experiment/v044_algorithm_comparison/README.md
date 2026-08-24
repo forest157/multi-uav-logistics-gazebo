@@ -59,6 +59,12 @@ source ~/catkin_ws/devel/setup.bash
 rosrun logistics_gazebo_sim benchmark_local_avoidance --cases 30 --json /tmp/avoidance.json --csv /tmp/avoidance.csv
 ```
 
+## 编队一致性投影
+
+在每架无人机独立优化后，计算各机相对名义编队的平均三维位移，并将预测轨迹投影到同一个共享位移。强度 1.0 时保持名义相对槽位，离线 30 场景可行率为 24/30（80%），已接受轨迹预测最小机间距为 4.0 m，平均求解 154.22 ms。
+
+Gazebo 完整回归仍为 `COMPLETE` 且三机解除武装：93 组预测中 58 组通过，可行率 62.4%，平均求解 128.49 ms。20 条机间距拒绝全部发生在 `DELIVERY_DESCENT`，去程避障阶段为 0。分析确认这些样本的名义投递轨迹本身已低于 MPC 的 3 m 阈值，而非一致性投影造成编队发散。系统新增 `NOMINAL_VEHICLE_SEPARATION`，将任务轨迹问题与 MPC 引入的 `VEHICLE_SEPARATION` 分开报告。
+
 ## 运行环境故障记录
 
 压力测试期间曾出现 SciPy `double free`、NumPy 随机类型错误以及纯 Python `copy.deepcopy` 段错误。逐逻辑 CPU 运行 20 万次纯 Python 分配测试后，CPU 8、9 稳定失败，其余 30 个逻辑 CPU 全部通过。容器已临时限制到 `0-7,10-31`；限制后连续 10 轮、每轮 50 万次健康检查全部通过，工程测试与 30 场景基准恢复稳定。该问题属于当前宿主机 CPU／平台稳定性，不应通过放宽算法安全门掩盖。宿主机后续应检查 BIOS、微码、超频／降压、内存和 CPU 稳定性。
