@@ -104,6 +104,14 @@ class LocalAvoidanceTest(unittest.TestCase):
         with self.assertRaises(DynamicObstacleError):DistributedMpcPlanner().plan(self.paths(3),[],mpc_consensus_strength=1.1)
 
 
+    def test_distributed_mpc_distinguishes_unsafe_nominal_spacing(self):
+        paths=[[[0,0,0,8],[4,8,0,8]],[[0,0,2.5,8],[4,8,2.5,8]]]
+        result=DistributedMpcPlanner().plan(paths,[],minimum_separation=3.0,mpc_consensus_strength=1.0)
+        self.assertFalse(result["viable"]);self.assertFalse(result["nominal_fleet_separation"]["safe"])
+        self.assertIn("NOMINAL_VEHICLE_SEPARATION",result["rejection_summary"])
+        self.assertNotIn("VEHICLE_SEPARATION",result["rejection_summary"])
+
+
     def test_distributed_mpc_timeout_is_contained(self):
         result=DistributedMpcPlanner().plan(self.paths(3),[],mpc_vehicle_timeout_s=0.0001)
         self.assertFalse(result["viable"]);self.assertTrue(result["solver_isolated"])
