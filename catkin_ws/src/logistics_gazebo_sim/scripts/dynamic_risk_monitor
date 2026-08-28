@@ -54,7 +54,8 @@ class DynamicRiskMonitor:
                              TwistStamped,self.velocity_cb,callback_args=index,queue_size=1)
             rospy.Subscriber("/uav{}/nominal_target_pose".format(index), PoseStamped,
                              self.target_cb, callback_args=index, queue_size=1)
-        rospy.Subscriber("/dynamic_obstacles/state", String,
+        obstacle_state_topic=str(rospy.get_param("~obstacle_state_topic","/dynamic_obstacles/state"))
+        rospy.Subscriber(obstacle_state_topic, String,
                          self.obstacles_cb, queue_size=1)
         rospy.Subscriber("/fleet/nominal_prediction", String,
                          self.prediction_cb, queue_size=1)

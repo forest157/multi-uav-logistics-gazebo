@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Convert Gazebo truth into a configurable synthetic perception stream."""
+import json
+from collections import deque
+import rospy
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+from logistics_gazebo_sim.target_tracking import simulate_detections
+
+
+class SensorBridge:
+    def __init__(self):
+        self.count=int(rospy.get_param("~vehicle_count",3));self.positions=[None]*self.count
+        sx=float(rospy.get_param("~spawn_x",-40.0));sy=float(rospy.get_param("~spawn_y",-40.0))
+        spacing=float(rospy.get_param("~spawn_spacing_m",3.3));middle=(self.count-1)*0.5
+        self.origins=[(sx+(index-middle)*spacing,sy) for index in range(self.count)]
+        self.maximum_range=float(rospy.get_param("~maximum_range_m",35.0))
+        self.noise=float(rospy.get_param("~position_noise_stddev_m",0.12))
+        self.dropout=float(rospy.get_param("~dropout_probability",0.03))
+        self.latency=float(rospy.get_param("~latency_s",0.10));self.sequence=0;self.pending=deque()
+        self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=5)
+        for index in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
+        rospy.Subscriber("/dynamic_obstacles/state",String,self.truth_cb,queue_size=1)
+        rospy.Timer(rospy.Duration(0.02),self.flush)
+
+    def pose_cb(self,message,index):
+        p=message.pose.position;origin=self.origins[index];self.positions[index]=[p.x+origin[0],p.y+origin[1],p.z]
+
+    def truth_cb(self,message):
+        try:
+            payload=json.loads(message.data);observers=[p for p in self.positions if p is not None]
+            if not observers:return
+            detections=simulate_detections(payload.get("obstacles",[]),observers,self.maximum_range,
+                self.noise,self.dropout,self.sequence);self.sequence+=1
+            output={"stamp":rospy.Time.now().to_sec(),"source_stamp":payload.get("stamp"),
+                "frame_id":payload.get("frame_id","map"),"sensor":"synthetic_3d_lidar","detections":detections}
+            self.pending.append((rospy.Time.now()+rospy.Duration(self.latency),output))
+        except (TypeError,ValueError,KeyError) as error:
+            rospy.logerr_throttle(2.0,"invalid truth input for sensor bridge: %s",error)
+
+    def flush(self,_event):
+        now=rospy.Time.now()
+        while self.pending and self.pending[0][0]<=now:self.publisher.publish(json.dumps(self.pending.popleft()[1],separators=(",",":")))
+
+if __name__=="__main__":
+    rospy.init_node("dynamic_obstacle_sensor_bridge");SensorBridge();rospy.spin()

@@ -18,6 +18,8 @@
   <arg name="orca_command_timeout_s" default="0.6"/>
   <arg name="orca_position_horizon_s" default="0.6"/>
   <arg name="dynamic_obstacle_config" default="$(find logistics_gazebo_sim)/config/dynamic_obstacles_crossing.yaml"/>
+  <arg name="dynamic_state_source" default="perception"/>
+  <arg name="dynamic_obstacle_state_topic" default="$(eval '/perception/dynamic_tracks' if arg('dynamic_state_source') == 'perception' else '/dynamic_obstacles/state')"/>
   <include file="$(find logistics_gazebo_sim)/launch/three_uav_sitl.launch">
     <arg name="scene_id" value="$(arg scene_id)"/>
     <arg name="gui" value="$(arg gui)"/>
@@ -37,7 +39,20 @@
     <param name="braking_margin_s" value="0.4"/><param name="critical_ttc_min_s" value="1.0"/><param name="critical_ttc_max_s" value="8.0"/>
     <param name="risk_release_delay_s" value="0.8"/>
     <param name="local_avoidance_algorithm" value="$(arg local_avoidance_algorithm)"/>
+    <param name="obstacle_state_topic" value="$(arg dynamic_obstacle_state_topic)"/>
   </node>
+  <group if="$(eval arg('dynamic_obstacles') == 'true' and arg('dynamic_state_source') == 'perception')">
+    <node pkg="logistics_gazebo_sim" type="dynamic_obstacle_sensor_bridge" name="dynamic_obstacle_sensor_bridge" output="screen">
+      <param name="vehicle_count" value="$(arg vehicle_count)"/>
+      <param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/>
+      <param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
+      <param name="maximum_range_m" value="35.0"/><param name="position_noise_stddev_m" value="0.12"/>
+      <param name="dropout_probability" value="0.03"/><param name="latency_s" value="0.10"/>
+    </node>
+    <node pkg="logistics_gazebo_sim" type="dynamic_target_tracker" name="dynamic_target_tracker" output="screen">
+      <param name="alpha" value="0.75"/><param name="beta" value="0.2"/><param name="maximum_age_s" value="1.0"/>
+    </node>
+  </group>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim"
         type="dynamic_avoidance_planner" name="dynamic_avoidance_planner" output="screen" respawn="true">
     <env name="OPENBLAS_NUM_THREADS" value="1"/>
