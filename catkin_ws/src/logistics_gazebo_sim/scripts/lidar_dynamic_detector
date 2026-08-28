@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Extract non-persistent dynamic clusters from the aggregated physical lidar cloud."""
+import json
+import rospy
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs import point_cloud2
+from std_msgs.msg import String
+from logistics_gazebo_sim.pointcloud_perception import VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles
+
+
+class LidarDynamicDetector:
+    def __init__(self):
+        self.count=int(rospy.get_param("~vehicle_count",3));self.vehicles=[None]*self.count
+        sx=float(rospy.get_param("~spawn_x",-40.0));sy=float(rospy.get_param("~spawn_y",-40.0));spacing=float(rospy.get_param("~spawn_spacing_m",3.3));middle=(self.count-1)*0.5
+        self.origins=[(sx+(index-middle)*spacing,sy) for index in range(self.count)]
+        self.ground=float(rospy.get_param("~ground_filter_z",0.7));self.warmup=int(rospy.get_param("~warmup_frames",8));self.frames=0
+        self.background=VoxelBackground(rospy.get_param("~voxel_size_m",0.45),rospy.get_param("~background_hits",4),rospy.get_param("~forget_after_frames",40))
+        self.tolerance=float(rospy.get_param("~cluster_tolerance_m",0.9));self.minimum=int(rospy.get_param("~minimum_cluster_points",8))
+        self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=2)
+        for index in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
+        rospy.Subscriber("/perception/lidar_points",PointCloud2,self.cloud_cb,queue_size=1)
+
+    def pose_cb(self,message,index):
+        position=message.pose.position;origin=self.origins[index]
+        self.vehicles[index]=(position.x+origin[0],position.y+origin[1],position.z)
+    def cloud_cb(self,message):
+        points=[tuple(p) for p in point_cloud2.read_points(message,field_names=("x","y","z"),skip_nans=True) if p[2]>=self.ground]
+        points=exclude_near_vehicles(points,[v for v in self.vehicles if v is not None],1.0);dynamic=self.background.update(points);self.frames+=1
+        clusters=[] if self.frames<=self.warmup else euclidean_clusters(dynamic,self.tolerance,self.minimum)
+        detections=[cluster_detection("lidar_cluster_{}".format(index),cluster) for index,cluster in enumerate(clusters)]
+        self.publisher.publish(json.dumps({"stamp":message.header.stamp.to_sec(),"frame_id":message.header.frame_id or "world","sensor":"gazebo_3d_lidar","detections":detections},separators=(",",":")))
+
+if __name__=="__main__":
+    rospy.init_node("lidar_dynamic_detector");LidarDynamicDetector();rospy.spin()
