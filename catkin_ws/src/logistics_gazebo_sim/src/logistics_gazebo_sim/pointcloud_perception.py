@@ -54,3 +54,28 @@ def cluster_detection(identity,cluster):
     spans=[max(p[axis] for p in cluster)-min(p[axis] for p in cluster) for axis in range(3)]
     return {"id":identity,"position":center,"radius":max(0.2,0.5*max(spans[0],spans[1])),
             "height":max(0.2,spans[2]),"confidence":min(1.0,len(cluster)/30.0),"point_count":len(cluster)}
+
+
+class DetectionAssociator:
+    """Assign stable IDs and require repeated observations before publication."""
+    def __init__(self,maximum_distance=1.8,confirmation_hits=3,maximum_misses=3):
+        self.maximum_distance=float(maximum_distance);self.confirmation_hits=int(confirmation_hits)
+        self.maximum_misses=int(maximum_misses);self.tracks={};self.sequence=0
+    def update(self,detections):
+        unmatched=set(self.tracks);assigned=[]
+        for detection in detections:
+            best=None;distance=self.maximum_distance
+            for identity in unmatched:
+                value=math.sqrt(sum((a-b)**2 for a,b in zip(detection["position"],self.tracks[identity]["position"])))
+                if value<distance:best,distance=identity,value
+            if best is None:
+                best="lidar_target_{}".format(self.sequence);self.sequence+=1
+                self.tracks[best]={"hits":0,"misses":0,"position":detection["position"]}
+            else:unmatched.remove(best)
+            track=self.tracks[best];track["hits"]+=1;track["misses"]=0;track["position"]=detection["position"]
+            output=dict(detection);output["id"]=best;output["confirmation_hits"]=track["hits"]
+            if track["hits"]>=self.confirmation_hits:assigned.append(output)
+        for identity in unmatched:
+            self.tracks[identity]["misses"]+=1
+            if self.tracks[identity]["misses"]>self.maximum_misses:del self.tracks[identity]
+        return assigned

@@ -6,7 +6,7 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs import point_cloud2
 from std_msgs.msg import String
-from logistics_gazebo_sim.pointcloud_perception import VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles
+from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator,VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles
 
 
 class LidarDynamicDetector:
@@ -18,6 +18,8 @@ class LidarDynamicDetector:
         self.background=VoxelBackground(rospy.get_param("~voxel_size_m",0.45),rospy.get_param("~background_hits",4),rospy.get_param("~forget_after_frames",40))
         self.tolerance=float(rospy.get_param("~cluster_tolerance_m",0.9));self.minimum=int(rospy.get_param("~minimum_cluster_points",8))
         self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=2)
+        self.status_publisher=rospy.Publisher("/perception/status",String,queue_size=2,latch=True)
+        self.associator=DetectionAssociator(rospy.get_param("~association_distance_m",1.8),rospy.get_param("~confirmation_hits",3),rospy.get_param("~maximum_misses",3))
         for index in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
         rospy.Subscriber("/perception/lidar_points",PointCloud2,self.cloud_cb,queue_size=1)
 
@@ -28,8 +30,11 @@ class LidarDynamicDetector:
         points=[tuple(p) for p in point_cloud2.read_points(message,field_names=("x","y","z"),skip_nans=True) if p[2]>=self.ground]
         points=exclude_near_vehicles(points,[v for v in self.vehicles if v is not None],1.0);dynamic=self.background.update(points);self.frames+=1
         clusters=[] if self.frames<=self.warmup else euclidean_clusters(dynamic,self.tolerance,self.minimum)
-        detections=[cluster_detection("lidar_cluster_{}".format(index),cluster) for index,cluster in enumerate(clusters)]
+        candidates=[cluster_detection("candidate_{}".format(index),cluster) for index,cluster in enumerate(clusters)]
+        detections=self.associator.update(candidates)
         self.publisher.publish(json.dumps({"stamp":message.header.stamp.to_sec(),"frame_id":message.header.frame_id or "world","sensor":"gazebo_3d_lidar","detections":detections},separators=(",",":")))
+        state="WARMING_UP" if self.frames<=self.warmup else "TRACKING"
+        self.status_publisher.publish(json.dumps({"state":state,"source":"lidar","frame":self.frames,"warmup_frames":self.warmup,"raw_points":len(points),"dynamic_points":len(dynamic),"candidate_clusters":len(candidates),"confirmed_targets":len(detections)},separators=(",",":")))
 
 if __name__=="__main__":
     rospy.init_node("lidar_dynamic_detector");LidarDynamicDetector();rospy.spin()
