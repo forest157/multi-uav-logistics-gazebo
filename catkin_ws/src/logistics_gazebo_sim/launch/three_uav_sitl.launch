@@ -15,7 +15,7 @@
   </include>
 
   <group ns="uav0">
-    <include file="$(find px4)/launch/single_vehicle_spawn.launch">
+    <include file="$(find logistics_gazebo_sim)/launch/single_vehicle_lidar_spawn.launch">
       <arg name="x" value="$(eval float(arg('spawn_x')) - float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
       <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
       <arg name="vehicle" value="iris"/><arg name="mavlink_udp_port" value="14560"/>
@@ -31,7 +31,7 @@
   </group>
 
   <group ns="uav1">
-    <include file="$(find px4)/launch/single_vehicle_spawn.launch">
+    <include file="$(find logistics_gazebo_sim)/launch/single_vehicle_lidar_spawn.launch">
       <arg name="x" value="$(arg spawn_x)"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
       <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
       <arg name="vehicle" value="iris"/><arg name="mavlink_udp_port" value="14561"/>
@@ -47,7 +47,7 @@
   </group>
 
   <group ns="uav2">
-    <include file="$(find px4)/launch/single_vehicle_spawn.launch">
+    <include file="$(find logistics_gazebo_sim)/launch/single_vehicle_lidar_spawn.launch">
       <arg name="x" value="$(eval float(arg('spawn_x')) + float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="z" value="0"/>
       <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
       <arg name="vehicle" value="iris"/><arg name="mavlink_udp_port" value="14562"/>

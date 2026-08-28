@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Transform per-UAV Gazebo block-laser clouds into the shared world frame."""
+import math
+import rospy
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import PointCloud, PointCloud2
+from sensor_msgs import point_cloud2
+from std_msgs.msg import Header
+
+
+def rotate(point, quaternion):
+    x,y,z=point;qx,qy,qz,qw=quaternion
+    tx=2.0*(qy*z-qz*y);ty=2.0*(qz*x-qx*z);tz=2.0*(qx*y-qy*x)
+    return (x+qw*tx+(qy*tz-qz*ty),y+qw*ty+(qz*tx-qx*tz),z+qw*tz+(qx*ty-qy*tx))
+
+
+class LidarCloudAggregator:
+    def __init__(self):
+        self.count=int(rospy.get_param("~vehicle_count",3));sx=float(rospy.get_param("~spawn_x",-40.0));sy=float(rospy.get_param("~spawn_y",-40.0));spacing=float(rospy.get_param("~spawn_spacing_m",3.3));middle=(self.count-1)*0.5
+        self.origins=[(sx+(i-middle)*spacing,sy) for i in range(self.count)];self.poses=[None]*self.count;self.clouds=[None]*self.count
+        self.publisher=rospy.Publisher("/perception/lidar_points",PointCloud2,queue_size=1)
+        for index in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
+            rospy.Subscriber("/uav{}/lidar/points".format(index),PointCloud,self.cloud_cb,index,queue_size=1)
+        rospy.Timer(rospy.Duration(0.2),self.publish)
+
+    def pose_cb(self,message,index):self.poses[index]=message.pose
+    def cloud_cb(self,message,index):self.clouds[index]=(rospy.Time.now(),message)
+
+    def publish(self,_event):
+        now=rospy.Time.now();points=[]
+        for index,item in enumerate(self.clouds):
+            pose=self.poses[index]
+            if pose is None or item is None or now-item[0]>rospy.Duration(0.6):continue
+            q=pose.orientation;quaternion=(q.x,q.y,q.z,q.w);origin=self.origins[index]
+            for raw in item[1].points:
+                if not all(math.isfinite(v) for v in (raw.x,raw.y,raw.z)):continue
+                x,y,z=rotate((raw.x,raw.y,raw.z),quaternion)
+                points.append((x+pose.position.x+origin[0],y+pose.position.y+origin[1],z+pose.position.z))
+        self.publisher.publish(point_cloud2.create_cloud_xyz32(Header(stamp=now,frame_id="world"),points))
+
+if __name__=="__main__":
+    rospy.init_node("lidar_cloud_aggregator");LidarCloudAggregator();rospy.spin()

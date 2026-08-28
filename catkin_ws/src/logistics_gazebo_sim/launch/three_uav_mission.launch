@@ -20,6 +20,7 @@
   <arg name="dynamic_obstacle_config" default="$(find logistics_gazebo_sim)/config/dynamic_obstacles_crossing.yaml"/>
   <arg name="dynamic_state_source" default="perception"/>
   <arg name="dynamic_obstacle_state_topic" default="$(eval '/perception/dynamic_tracks' if arg('dynamic_state_source') == 'perception' else '/dynamic_obstacles/state')"/>
+  <arg name="lidar_visualization" default="true"/>
   <include file="$(find logistics_gazebo_sim)/launch/three_uav_sitl.launch">
     <arg name="scene_id" value="$(arg scene_id)"/>
     <arg name="gui" value="$(arg gui)"/>
@@ -54,6 +55,9 @@
     </node>
     <node pkg="logistics_gazebo_sim" type="perception_visualizer" name="perception_visualizer" output="screen"/>
   </group>
+  <node if="$(arg lidar_visualization)" pkg="logistics_gazebo_sim" type="lidar_cloud_aggregator" name="lidar_cloud_aggregator" output="screen">
+    <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
+  </node>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim"
         type="dynamic_avoidance_planner" name="dynamic_avoidance_planner" output="screen" respawn="true">
     <env name="OPENBLAS_NUM_THREADS" value="1"/>

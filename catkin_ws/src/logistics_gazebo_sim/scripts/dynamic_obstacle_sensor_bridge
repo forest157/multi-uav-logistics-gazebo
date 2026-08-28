@@ -23,7 +23,7 @@ class SensorBridge:
         self.dropout=float(rospy.get_param("~dropout_probability",0.03))
         self.latency=float(rospy.get_param("~latency_s",0.10));self.sequence=0;self.pending=deque()
         self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=5)
-        self.cloud_publisher=rospy.Publisher("/perception/lidar_points",PointCloud2,queue_size=1)
+        self.cloud_publisher=rospy.Publisher("/perception/lidar_points_synthetic",PointCloud2,queue_size=1)
         for index in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
         rospy.Subscriber("/dynamic_obstacles/state",String,self.truth_cb,queue_size=1)
