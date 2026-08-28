@@ -168,11 +168,12 @@ class DynamicRiskMonitor:
             "rejection_summary":{"PLANNER_PENDING":1}}
 
     def report(self):
-        if self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp>rospy.Duration(1.0):
+        obstacle_feed_fresh=(self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp<=rospy.Duration(1.0))
+        if not obstacle_feed_fresh:
             self.obstacles=[]
+            return {"level":"STALE","message":"等待动态障碍数据","vehicle_reports":[],"obstacle_count":0}
         if not self.obstacles:
-            return {"level": "STALE", "message": "等待动态障碍数据",
-                    "vehicle_reports": [], "obstacle_count": 0}
+            return {"level":"SAFE","message":"未检测到动态障碍","vehicle_reports":[],"obstacle_count":0,"minimum_clearance_m":None,"time_to_conflict_s":None,"local_avoidance_algorithm":self.local_avoidance_algorithm,"avoidance":{"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None}}
         if any(value is None for value in self.poses+self.targets):
             return {"level": "STALE", "message": "等待无人机位姿与目标",
                     "vehicle_reports": [], "obstacle_count": len(self.obstacles)}
