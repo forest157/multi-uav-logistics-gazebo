@@ -52,6 +52,7 @@
     <node pkg="logistics_gazebo_sim" type="dynamic_target_tracker" name="dynamic_target_tracker" output="screen">
       <param name="alpha" value="0.75"/><param name="beta" value="0.2"/><param name="maximum_age_s" value="1.0"/>
     </node>
+    <node pkg="logistics_gazebo_sim" type="perception_visualizer" name="perception_visualizer" output="screen"/>
   </group>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim"
         type="dynamic_avoidance_planner" name="dynamic_avoidance_planner" output="screen" respawn="true">

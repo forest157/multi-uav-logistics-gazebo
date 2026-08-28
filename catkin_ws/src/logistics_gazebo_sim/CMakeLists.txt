@@ -8,7 +8,7 @@ include_directories(${catkin_INCLUDE_DIRS} ${OMPL_INCLUDE_DIRS})
 add_executable(ompl_3d_planner src/ompl_3d_planner.cpp)
 target_link_libraries(ompl_3d_planner ${catkin_LIBRARIES} ${OMPL_LIBRARIES})
 install(TARGETS ompl_3d_planner RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-catkin_install_python(PROGRAMS scripts/generate_worlds scripts/generate_missions scripts/analyze_clearance scripts/gazebo_marker_sync scripts/offboard_controller scripts/fleet_mission_player scripts/fleet_safety_monitor scripts/fleet_visualizer scripts/mission_recorder scripts/parcel_delivery_manager scripts/dynamic_obstacle_simulator scripts/dynamic_obstacle_sensor_bridge scripts/dynamic_target_tracker scripts/dynamic_risk_monitor scripts/dynamic_avoidance_planner scripts/benchmark_local_avoidance
+catkin_install_python(PROGRAMS scripts/generate_worlds scripts/generate_missions scripts/analyze_clearance scripts/gazebo_marker_sync scripts/offboard_controller scripts/fleet_mission_player scripts/fleet_safety_monitor scripts/fleet_visualizer scripts/mission_recorder scripts/parcel_delivery_manager scripts/dynamic_obstacle_simulator scripts/dynamic_obstacle_sensor_bridge scripts/dynamic_target_tracker scripts/perception_visualizer scripts/dynamic_risk_monitor scripts/dynamic_avoidance_planner scripts/benchmark_local_avoidance
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 install(DIRECTORY launch config worlds resources DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 install(FILES plugin.xml DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
