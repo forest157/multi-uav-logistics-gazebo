@@ -17,6 +17,7 @@ class LidarDynamicDetector:
         self.ground=float(rospy.get_param("~ground_filter_z",0.7));self.warmup=int(rospy.get_param("~warmup_frames",8));self.frames=0
         self.background=VoxelBackground(rospy.get_param("~voxel_size_m",0.45),rospy.get_param("~background_hits",4),rospy.get_param("~forget_after_frames",40))
         self.tolerance=float(rospy.get_param("~cluster_tolerance_m",0.9));self.minimum=int(rospy.get_param("~minimum_cluster_points",8))
+        self.maximum_radius=float(rospy.get_param("~maximum_target_radius_m",1.4));self.maximum_height=float(rospy.get_param("~maximum_target_height_m",2.0))
         self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=2)
         self.status_publisher=rospy.Publisher("/perception/status",String,queue_size=2,latch=True)
         self.associator=DetectionAssociator(rospy.get_param("~association_distance_m",1.8),rospy.get_param("~confirmation_hits",3),rospy.get_param("~maximum_misses",3))
@@ -30,7 +31,7 @@ class LidarDynamicDetector:
         points=[tuple(p) for p in point_cloud2.read_points(message,field_names=("x","y","z"),skip_nans=True) if p[2]>=self.ground]
         points=exclude_near_vehicles(points,[v for v in self.vehicles if v is not None],1.0);dynamic=self.background.update(points);self.frames+=1
         clusters=[] if self.frames<=self.warmup else euclidean_clusters(dynamic,self.tolerance,self.minimum)
-        candidates=[cluster_detection("candidate_{}".format(index),cluster) for index,cluster in enumerate(clusters)]
+        candidates=[cluster_detection("candidate_{}".format(index),cluster) for index,cluster in enumerate(clusters)];candidates=[item for item in candidates if item["radius"]<=self.maximum_radius and item["height"]<=self.maximum_height]
         detections=self.associator.update(candidates)
         self.publisher.publish(json.dumps({"stamp":message.header.stamp.to_sec(),"frame_id":message.header.frame_id or "world","sensor":"gazebo_3d_lidar","detections":detections},separators=(",",":")))
         state="WARMING_UP" if self.frames<=self.warmup else "TRACKING"
