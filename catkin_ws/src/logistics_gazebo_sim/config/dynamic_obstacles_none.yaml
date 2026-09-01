@@ -1,0 +1,3 @@
+frame_id: map
+rate_hz: 40.0
+obstacles: []
