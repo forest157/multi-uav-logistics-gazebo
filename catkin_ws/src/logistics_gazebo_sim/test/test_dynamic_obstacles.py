@@ -157,6 +157,12 @@ class DynamicObstacleTest(unittest.TestCase):
         result=plan_collective_avoidance(paths,[],candidate_offsets=[[0.0,0.0,0.0]],scene_id=0)
         self.assertTrue(result["viable"]);self.assertTrue(result["static_validation"]["feasible"])
 
+    def test_collective_planner_prefers_lateral_over_shorter_vertical_offset(self):
+        paths=[[[0.0,-40.0,-40.0,8.0],[10.0,-35.0,-40.0,8.0]]]
+        obstacle={"id":"bird","position":[-30.0,-30.0,8.0],"velocity":[0,0,0],"radius":.5,"height":.8}
+        result=plan_collective_avoidance(paths,[obstacle],candidate_offsets=[[0.0,3.5,0.0],[0.0,0.0,3.0]],scene_id=0)
+        self.assertTrue(result["viable"]);self.assertEqual(result["selected_offset"],[0.0,3.5,0.0])
+
     def viable_avoidance(self,offset=(0.0,3.0,0.0)):
         return {"viable":True,"selected_offset":list(offset),"static_validation":{"feasible":True}}
 
@@ -175,6 +181,13 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertEqual(execution.update("SAFE",{},1.0)["state"],"RECOVERING")
         self.assertAlmostEqual(execution.command(2.0)["offset"][1],1.5,places=2)
         self.assertEqual(execution.command(3.0)["state"],"IDLE")
+
+    def test_recovery_clears_stale_failure_diagnostic(self):
+        execution=AvoidanceExecution(confirmation_s=0.0,apply_s=.1,recover_s=.1)
+        execution.update("WARNING",self.viable_avoidance(),0.0);execution.update("WARNING",self.viable_avoidance(),0.0)
+        execution.command(.1);execution.failure="old planner failure"
+        execution.update("SAFE",{},.1);command=execution.command(.2)
+        self.assertEqual(command["state"],"IDLE");self.assertIsNone(command["failure"])
 
     def test_invalid_or_changed_candidate_falls_back_to_hold(self):
         execution=AvoidanceExecution(confirmation_s=0.0,apply_s=1.0)

@@ -354,12 +354,14 @@ def plan_collective_avoidance(paths,obstacles,candidate_offsets=None,horizon=8.0
                "static_validation":static,"fleet_separation":separation,"rejection_reason":rejection}
         evaluated.append(value)
         if rejection is None:
-            norm=float(np.linalg.norm(np.asarray(offset,dtype=float)));viable.append((norm,len(evaluated),value))
+            vector=np.asarray(offset,dtype=float);norm=float(np.linalg.norm(vector))
+            vertical_only=abs(vector[2])>1e-9 and float(np.linalg.norm(vector[:2]))<=1e-9
+            viable.append((vertical_only,norm,len(evaluated),value))
         else:rejection_summary[rejection]=rejection_summary.get(rejection,0)+1
     if not viable:return {"viable":False,"selected_offset":None,"minimum_clearance_m":None,
         "candidates":evaluated,"reason":"no collective offset satisfies dynamic, static and fleet separation constraints",
         "rejection_summary":rejection_summary}
-    selected=min(viable,key=lambda item:(item[0],item[1]))[2]
+    selected=min(viable,key=lambda item:(item[0],item[1],item[2]))[3]
     return {"viable":True,"selected_offset":selected["offset"],
             "minimum_clearance_m":selected["minimum_clearance_m"],"candidates":evaluated,
             "reason":"safe collective offset found","static_validation":selected["static_validation"],
@@ -437,7 +439,7 @@ class AvoidanceExecution:
             ratio=min(1.0,max(0.0,(now-self.transition_started)/max(.01,self.recover_s)))
             ratio=ratio*ratio*(3.0-2.0*ratio)
             self.active=self.start_offset*(1.0-ratio)
-            if ratio>=1.0:self.state="IDLE";self.active=np.zeros(3)
+            if ratio>=1.0:self.state="IDLE";self.active=np.zeros(3);self.failure=None
         action=("HOLD" if self.state=="HOLD" else
                 "AVOID" if self.state in ("APPLYING","ACTIVE","RECOVERING")
                 else "WAIT")

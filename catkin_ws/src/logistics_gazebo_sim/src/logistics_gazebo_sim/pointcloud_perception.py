@@ -63,11 +63,22 @@ def target_sized_detections(detections,maximum_radius=1.4,maximum_height=2.0):
 
 
 class DetectionAssociator:
-    """Assign stable IDs and require repeated observations before publication."""
-    def __init__(self,maximum_distance=1.8,confirmation_hits=3,maximum_misses=3):
+    """Assign stable IDs and confirm only consistently moving observations."""
+    def __init__(self,maximum_distance=1.8,confirmation_hits=3,maximum_misses=3,
+                 minimum_speed=1.5,maximum_speed=12.0,
+                 minimum_direction_cosine=0.7,maximum_acceleration=5.0):
         self.maximum_distance=float(maximum_distance);self.confirmation_hits=int(confirmation_hits)
-        self.maximum_misses=int(maximum_misses);self.tracks={};self.sequence=0
-    def update(self,detections):
+        self.maximum_misses=int(maximum_misses);self.minimum_speed=float(minimum_speed)
+        self.maximum_speed=float(maximum_speed);self.minimum_direction_cosine=float(minimum_direction_cosine)
+        self.maximum_acceleration=float(maximum_acceleration)
+        if self.minimum_speed<0.0 or self.maximum_speed<=self.minimum_speed:
+            raise ValueError("motion speed limits are invalid")
+        if not -1.0<=self.minimum_direction_cosine<=1.0:
+            raise ValueError("minimum direction cosine must be between -1 and 1")
+        if self.maximum_acceleration<=0.0:raise ValueError("maximum acceleration must be positive")
+        self.tracks={};self.sequence=0;self.frame=0
+    def update(self,detections,stamp=None):
+        self.frame+=1;stamp=float(self.frame*0.2 if stamp is None else stamp)
         unmatched=set(self.tracks);assigned=[]
         for detection in detections:
             best=None;distance=self.maximum_distance
@@ -76,11 +87,26 @@ class DetectionAssociator:
                 if value<distance:best,distance=identity,value
             if best is None:
                 best="lidar_target_{}".format(self.sequence);self.sequence+=1
-                self.tracks[best]={"hits":0,"misses":0,"position":detection["position"]}
+                self.tracks[best]={"hits":0,"motion_hits":0,"misses":0,
+                    "position":detection["position"],"stamp":stamp,"velocity":None}
             else:unmatched.remove(best)
-            track=self.tracks[best];track["hits"]+=1;track["misses"]=0;track["position"]=detection["position"]
+            track=self.tracks[best];previous=track["position"];dt=stamp-track["stamp"]
+            velocity=None
+            if track["hits"] and dt>0.0:
+                velocity=[(float(a)-float(b))/dt for a,b in zip(detection["position"],previous)]
+                speed=math.sqrt(sum(axis*axis for axis in velocity));consistent=self.minimum_speed<=speed<=self.maximum_speed
+                prior=track.get("velocity")
+                if consistent and prior is not None:
+                    prior_speed=math.sqrt(sum(axis*axis for axis in prior))
+                    cosine=sum(a*b for a,b in zip(velocity,prior))/(speed*prior_speed) if prior_speed>1e-9 else -1.0
+                    acceleration=math.sqrt(sum((a-b)**2 for a,b in zip(velocity,prior)))/dt
+                    consistent=cosine>=self.minimum_direction_cosine and acceleration<=self.maximum_acceleration
+                track["motion_hits"]=track["motion_hits"]+1 if consistent else 0
+            track["hits"]+=1;track["misses"]=0;track["position"]=detection["position"];track["stamp"]=stamp
+            if velocity is not None:track["velocity"]=velocity
             output=dict(detection);output["id"]=best;output["confirmation_hits"]=track["hits"]
-            if track["hits"]>=self.confirmation_hits:assigned.append(output)
+            output["motion_hits"]=track["motion_hits"]
+            if track["hits"]>=self.confirmation_hits and track["motion_hits"]>=self.confirmation_hits-1:assigned.append(output)
         for identity in unmatched:
             self.tracks[identity]["misses"]+=1
             if self.tracks[identity]["misses"]>self.maximum_misses:del self.tracks[identity]
