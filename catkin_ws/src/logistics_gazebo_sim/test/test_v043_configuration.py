@@ -33,7 +33,7 @@ class V043ConfigurationTest(unittest.TestCase):
         package=ET.parse(os.path.join(ROOT,"package.xml")).getroot().findtext("version")
         setup=Path(ROOT,"setup.py").read_text(encoding="utf-8")
         self.assertIn("version='{}'".format(package),setup)
-        self.assertEqual(package,"0.4.5")
+        self.assertEqual(package,"0.5.1")
     def test_unified_package_readme_is_clean_utf8(self):
         text=Path(ROOT,"README.md").read_bytes().decode("utf-8")
         self.assertNotIn("\ufffd",text)

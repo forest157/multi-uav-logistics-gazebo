@@ -4,6 +4,13 @@ import bisect
 
 import numpy as np
 
+def obstacle_feed_state(last_update_s,now_s,timeout_s=1.0):
+    """Classify transport freshness independently from an empty obstacle set."""
+    if last_update_s is None:return "STALE"
+    age=float(now_s)-float(last_update_s)
+    return "FRESH" if 0.0<=age<=float(timeout_s) else "STALE"
+
+
 
 class DynamicObstacleError(ValueError):
     pass

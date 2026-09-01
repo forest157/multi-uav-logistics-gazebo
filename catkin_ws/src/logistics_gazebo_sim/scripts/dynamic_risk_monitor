@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim.dynamic_obstacles import RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, prediction_path
+from logistics_gazebo_sim.dynamic_obstacles import RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, obstacle_feed_state, prediction_path
 
 
 class DynamicRiskMonitor:
@@ -54,7 +54,8 @@ class DynamicRiskMonitor:
                              TwistStamped,self.velocity_cb,callback_args=index,queue_size=1)
             rospy.Subscriber("/uav{}/nominal_target_pose".format(index), PoseStamped,
                              self.target_cb, callback_args=index, queue_size=1)
-        rospy.Subscriber("/dynamic_obstacles/state", String,
+        obstacle_state_topic=str(rospy.get_param("~obstacle_state_topic","/dynamic_obstacles/state"))
+        rospy.Subscriber(obstacle_state_topic, String,
                          self.obstacles_cb, queue_size=1)
         rospy.Subscriber("/fleet/nominal_prediction", String,
                          self.prediction_cb, queue_size=1)
@@ -167,11 +168,12 @@ class DynamicRiskMonitor:
             "rejection_summary":{"PLANNER_PENDING":1}}
 
     def report(self):
-        if self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp>rospy.Duration(1.0):
+        now=rospy.Time.now();last=None if self.last_obstacle_stamp is None else self.last_obstacle_stamp.to_sec()
+        if obstacle_feed_state(last,now.to_sec(),1.0)=="STALE":
             self.obstacles=[]
+            return {"level":"STALE","message":"等待动态障碍数据","vehicle_reports":[],"obstacle_count":0}
         if not self.obstacles:
-            return {"level": "STALE", "message": "等待动态障碍数据",
-                    "vehicle_reports": [], "obstacle_count": 0}
+            return {"level":"SAFE","message":"未检测到动态障碍","vehicle_reports":[],"obstacle_count":0,"minimum_clearance_m":None,"time_to_conflict_s":None,"local_avoidance_algorithm":self.local_avoidance_algorithm,"avoidance":{"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None}}
         if any(value is None for value in self.poses+self.targets):
             return {"level": "STALE", "message": "等待无人机位姿与目标",
                     "vehicle_reports": [], "obstacle_count": len(self.obstacles)}

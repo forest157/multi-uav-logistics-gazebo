@@ -25,7 +25,7 @@ SCENE_DEFAULTS = {
 class PointBridge(QObject):
     point_received=Signal(float,float)
 class RosUiBridge(QObject):
-    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object)
+    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object);perception_received=Signal(object)
 
 class OperatorPlugin(Plugin):
     def __init__(self, context):
@@ -59,6 +59,7 @@ class OperatorPlugin(Plugin):
         self.dynamic_enabled=QCheckBox("启用交叉移动障碍物与在线风险预测");self.dynamic_enabled.setChecked(True)
         form.addRow("动态避障实验",self.dynamic_enabled)
         self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队偏移（稳定闭环）",("collective_offset","shadow",True));self.avoidance_mode.addItem("3D ORCA（影子模式）",("orca3d","shadow",False));self.avoidance_mode.addItem("分布式 MPC（影子模式）",("distributed_mpc","shadow",False));self.avoidance_mode.addItem("3D ORCA（受限接管）",("orca3d","limited",True));form.addRow("局部避障模式",self.avoidance_mode)
+        self.perception_source=QComboBox();self.perception_source.addItem("仿真感知（稳定）","perception");self.perception_source.addItem("物理 3D 雷达（实验）","lidar");self.perception_source.addItem("Gazebo 真值（对照）","truth");form.addRow("动态障碍数据源",self.perception_source)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
@@ -70,10 +71,10 @@ class OperatorPlugin(Plugin):
         self.start.setObjectName("primary");self.land.setObjectName("danger");self.pause.setObjectName("secondary");self.resume.setObjectName("secondary");self.reset.setObjectName("secondary")
         for button in (self.start,self.pause,self.resume,self.reset,self.land):row.addWidget(button)
         root.addWidget(mission)
-        status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e");self.dynamic_risk=QLabel("等待动态障碍数据")
+        status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e");self.dynamic_risk=QLabel("等待动态障碍数据");self.perception_status=QLabel("等待感知数据")
         self.state.setObjectName("statusBadge");self.stage.setObjectName("statusBadge")
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
-        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
+        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);sf.addRow("感知状态",self.perception_status);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
         self.process.setProcessChannelMode(QProcess.MergedChannels);self.process.readyReadStandardOutput.connect(self.drain_simulation_output)
         self.simulation_stop_requested=False;self.simulation_start_pending=False
@@ -92,10 +93,11 @@ class OperatorPlugin(Plugin):
         self.runtime_marker_pubs=[rospy.Publisher(topic,MarkerArray,queue_size=1,latch=True) for topic in ("/fleet/markers","/dynamic_obstacles/markers")]
         rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
-        self.formation.currentIndexChanged.connect(self.parameters_changed);self.avoidance_mode.currentIndexChanged.connect(self.parameters_changed)
-        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb)
+        self.formation.currentIndexChanged.connect(self.parameters_changed);self.avoidance_mode.currentIndexChanged.connect(self.parameters_changed);self.perception_source.currentIndexChanged.connect(self.parameters_changed)
+        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb)
         rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1)
         rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1)
+        rospy.Subscriber("/perception/status",String,lambda msg:self.ros_ui_bridge.perception_received.emit(msg),queue_size=1)
         self.update_defaults()
     def update_defaults(self):
         self.clear_runtime_markers()
@@ -106,7 +108,7 @@ class OperatorPlugin(Plugin):
         return (int(self.scene.currentData()),round(self.start_x.value(),3),
                 round(self.start_y.value(),3),round(self.goal_x.value(),3),
                 round(self.goal_y.value(),3),round(self.altitude.value(),3),
-                str(self.formation.currentData()),str(self.avoidance_mode.currentData()))
+                str(self.formation.currentData()),str(self.avoidance_mode.currentData()),str(self.perception_source.currentData()))
     def parameters_changed(self,_value=None):
         self.publish_preview();self.schedule_analysis()
     def schedule_analysis(self):
@@ -300,7 +302,7 @@ class OperatorPlugin(Plugin):
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
         sid=self.scene.currentData();mission=self.analysis_mission
         algorithm,orca_mode,execution=self.avoidance_mode.currentData()
-        self.clear_runtime_markers();self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
+        self.clear_runtime_markers();self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_state_source:={}".format(self.perception_source.currentData()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
         px4_root=os.path.expanduser("~/PX4_Firmware")
@@ -397,6 +399,16 @@ class OperatorPlugin(Plugin):
             self.dynamic_risk.setText(text)
             self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
         except (TypeError,ValueError):self.dynamic_risk.setText("动态风险数据格式错误")
+    def perception_status_cb(self,msg):
+        try:
+            value=json.loads(msg.data);state=value.get("state","UNKNOWN")
+            if state=="WARMING_UP":
+                text="物理雷达背景学习 {}/{}".format(value.get("frame",0),value.get("warmup_frames",8))
+            elif state=="TRACKING":
+                text="物理雷达 | 点 {} | 原始簇 {} | 过滤 {} | 候选 {} | 确认 {}".format(value.get("raw_points",0),value.get("raw_clusters",0),value.get("rejected_oversized",0),value.get("candidate_clusters",0),value.get("confirmed_targets",0))
+            else:text="感知源 {} | {}".format(value.get("source","-"),state)
+            self.perception_status.setText(text)
+        except (TypeError,ValueError,KeyError):self.perception_status.setText("感知状态数据格式错误")
     def shutdown_plugin(self):
         self.analysis_timer.stop();self.analysis_timeout.stop()
         if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)

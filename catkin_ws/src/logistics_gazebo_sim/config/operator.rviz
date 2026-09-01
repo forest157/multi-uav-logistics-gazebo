@@ -24,6 +24,21 @@ Visualization Manager:
       Enabled: true
       Marker Topic: /operator/preview_markers
       Queue Size: 10
+    - Class: rviz/PointCloud2
+      Name: 3D Lidar Points
+      Enabled: true
+      Topic: /perception/lidar_points
+      Queue Size: 2
+      Size (Pixels): 3
+      Style: Points
+      Color Transformer: FlatColor
+      Color: 40; 210; 255
+      Decay Time: 0.3
+    - Class: rviz/MarkerArray
+      Name: Perception Tracks and Velocity
+      Enabled: true
+      Marker Topic: /perception/dynamic_markers
+      Queue Size: 5
   Tools:
     - Class: rviz/Interact
     - Class: rviz/MoveCamera
