@@ -55,6 +55,12 @@ def cluster_detection(identity,cluster):
     return {"id":identity,"position":center,"radius":max(0.2,0.5*max(spans[0],spans[1])),
             "height":max(0.2,spans[2]),"confidence":min(1.0,len(cluster)/30.0),"point_count":len(cluster)}
 
+def target_sized_detections(detections,maximum_radius=1.4,maximum_height=2.0):
+    """Keep compact airborne targets and reject large static-scene fragments."""
+    maximum_radius=float(maximum_radius);maximum_height=float(maximum_height)
+    if maximum_radius<=0.0 or maximum_height<=0.0:raise ValueError("target size limits must be positive")
+    return [item for item in detections if 0.0<float(item.get("radius",0.0))<=maximum_radius and 0.0<float(item.get("height",0.0))<=maximum_height]
+
 
 class DetectionAssociator:
     """Assign stable IDs and require repeated observations before publication."""

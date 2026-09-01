@@ -8,7 +8,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim.dynamic_obstacles import RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, prediction_path
+from logistics_gazebo_sim.dynamic_obstacles import RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, obstacle_feed_state, prediction_path
 
 
 class DynamicRiskMonitor:
@@ -168,8 +168,8 @@ class DynamicRiskMonitor:
             "rejection_summary":{"PLANNER_PENDING":1}}
 
     def report(self):
-        obstacle_feed_fresh=(self.last_obstacle_stamp is not None and rospy.Time.now()-self.last_obstacle_stamp<=rospy.Duration(1.0))
-        if not obstacle_feed_fresh:
+        now=rospy.Time.now();last=None if self.last_obstacle_stamp is None else self.last_obstacle_stamp.to_sec()
+        if obstacle_feed_state(last,now.to_sec(),1.0)=="STALE":
             self.obstacles=[]
             return {"level":"STALE","message":"等待动态障碍数据","vehicle_reports":[],"obstacle_count":0}
         if not self.obstacles:

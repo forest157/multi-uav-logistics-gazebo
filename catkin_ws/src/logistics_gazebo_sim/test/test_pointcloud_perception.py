@@ -1,8 +1,13 @@
 import unittest
-from logistics_gazebo_sim.pointcloud_perception import VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles
+from logistics_gazebo_sim.pointcloud_perception import VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles,target_sized_detections
 
 
 class PointCloudPerceptionTest(unittest.TestCase):
+    def test_target_size_filter_rejects_building_fragments(self):
+        detections=[{"id":"bird","radius":.75,"height":.8},{"id":"wall","radius":2.2,"height":.5}]
+        self.assertEqual([item["id"] for item in target_sized_detections(detections)],["bird"])
+        with self.assertRaises(ValueError):target_sized_detections(detections,maximum_radius=0)
+
     def test_vehicle_exclusion(self):
         self.assertEqual(exclude_near_vehicles([(0,0,0),(3,0,0)],[(0,0,0)],1.0),[(3.0,0.0,0.0)])
     def test_static_voxel_becomes_background(self):

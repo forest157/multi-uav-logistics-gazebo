@@ -5,10 +5,16 @@ import numpy as np
 
 from logistics_gazebo_sim.dynamic_obstacles import (
     DynamicObstacleError, DynamicSafetyResponse, RiskLevelHysteresis, AvoidanceExecution, assess_fleet_separation, assess_timed_path, braking_ttc_threshold, interpolate_timed_path,
-    obstacle_clearance, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path, validate_static_paths)
+    obstacle_clearance, obstacle_feed_state, plan_collective_avoidance, minimum_spawn_clearance, prediction_path, predict_position, shifted_path, validate_static_paths)
 
 
 class DynamicObstacleTest(unittest.TestCase):
+    def test_empty_but_fresh_obstacle_feed_is_not_stale(self):
+        self.assertEqual(obstacle_feed_state(10.0,10.5),"FRESH")
+        self.assertEqual(obstacle_feed_state(None,10.5),"STALE")
+        self.assertEqual(obstacle_feed_state(9.0,10.5),"STALE")
+        self.assertEqual(obstacle_feed_state(11.0,10.5),"STALE")
+
     def obstacle(self, position=(5.0, -5.0, 5.0), velocity=(0.0, 1.0, 0.0)):
         return {"id": "crossing_1", "position": position,
                 "velocity": velocity, "radius": 0.8, "height": 2.0}
