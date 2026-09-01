@@ -19,4 +19,9 @@ class LidarModelTest(unittest.TestCase):
         aggregator=(ROOT/"scripts"/"lidar_cloud_aggregator").read_text(encoding="utf-8")
         self.assertIn('"/perception/lidar_points",PointCloud2',aggregator)
 
+    def test_cloud_aggregation_is_independent_from_visualization(self):
+        launch=(ROOT/"launch"/"three_uav_mission.launch").read_text(encoding="utf-8")
+        self.assertIn('<arg name="lidar_cloud_aggregation" default="true"/>',launch)
+        self.assertIn('<node if="$(arg lidar_cloud_aggregation)"',launch)
+
 if __name__=="__main__":unittest.main()

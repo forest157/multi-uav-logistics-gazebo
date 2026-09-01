@@ -405,7 +405,7 @@ class OperatorPlugin(Plugin):
             if state=="WARMING_UP":
                 text="物理雷达背景学习 {}/{}".format(value.get("frame",0),value.get("warmup_frames",8))
             elif state=="TRACKING":
-                text="物理雷达 | 点 {} | 原始簇 {} | 过滤 {} | 候选 {} | 确认 {}".format(value.get("raw_points",0),value.get("raw_clusters",0),value.get("rejected_oversized",0),value.get("candidate_clusters",0),value.get("confirmed_targets",0))
+                text="物理雷达 | 点 {} | 原始簇 {} | 过滤 {} | 候选 {} | 确认 {} | 置信 {:.0%}".format(value.get("raw_points",0),value.get("raw_clusters",0),value.get("rejected_oversized",0),value.get("candidate_clusters",0),value.get("confirmed_targets",0),float(value.get("mean_confidence",0.0)))
             else:text="感知源 {} | {}".format(value.get("source","-"),state)
             self.perception_status.setText(text)
         except (TypeError,ValueError,KeyError):self.perception_status.setText("感知状态数据格式错误")

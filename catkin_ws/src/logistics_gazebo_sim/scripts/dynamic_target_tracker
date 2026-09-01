@@ -8,14 +8,14 @@ from logistics_gazebo_sim.target_tracking import AlphaBetaTracker,TrackingError,
 
 class TargetTrackerNode:
     def __init__(self):
-        self.tracker=AlphaBetaTracker(rospy.get_param("~alpha",0.75),rospy.get_param("~beta",0.2),rospy.get_param("~maximum_age_s",1.0))
+        self.tracker=AlphaBetaTracker(rospy.get_param("~alpha",0.75),rospy.get_param("~beta",0.2),rospy.get_param("~maximum_age_s",1.5),rospy.get_param("~occlusion_confidence_decay_per_s",0.7),rospy.get_param("~minimum_occluded_confidence",0.15))
         self.publisher=rospy.Publisher("/perception/dynamic_tracks",String,queue_size=5)
         rospy.Subscriber("/perception/dynamic_detections",String,self.callback,queue_size=1)
 
     def callback(self,message):
         try:
             payload=validate_detection_payload(json.loads(message.data));tracks=self.tracker.update(payload["stamp"],payload["detections"])
-            obstacles=[{key:track[key] for key in ("id","position","velocity","radius","height","confidence","observed")} for track in tracks]
+            obstacles=[{key:track[key] for key in ("id","position","velocity","radius","height","confidence","observed","occluded_for_s")} for track in tracks]
             self.publisher.publish(json.dumps({"stamp":payload["stamp"],"frame_id":payload["frame_id"],
                 "source":"perception","obstacles":obstacles},separators=(",",":")))
         except (TypeError,ValueError,KeyError,TrackingError) as error:

@@ -62,6 +62,14 @@ def target_sized_detections(detections,maximum_radius=1.4,maximum_height=2.0):
     return [item for item in detections if 0.0<float(item.get("radius",0.0))<=maximum_radius and 0.0<float(item.get("height",0.0))<=maximum_height]
 
 
+def calibrated_detection_confidence(detection,motion_hits,confirmation_hits):
+    """Combine point support and motion consistency into an interpretable score."""
+    support=min(1.0,max(0.0,float(detection.get("point_count",0)))/30.0)
+    required=max(1,int(confirmation_hits)-1)
+    motion=min(1.0,max(0.0,float(motion_hits))/required)
+    return round(0.65*support+0.35*motion,3)
+
+
 class DetectionAssociator:
     """Assign stable IDs and confirm only consistently moving observations."""
     def __init__(self,maximum_distance=1.8,confirmation_hits=3,maximum_misses=3,
@@ -106,6 +114,7 @@ class DetectionAssociator:
             if velocity is not None:track["velocity"]=velocity
             output=dict(detection);output["id"]=best;output["confirmation_hits"]=track["hits"]
             output["motion_hits"]=track["motion_hits"]
+            output["confidence"]=calibrated_detection_confidence(output,track["motion_hits"],self.confirmation_hits)
             if track["hits"]>=self.confirmation_hits and track["motion_hits"]>=self.confirmation_hits-1:assigned.append(output)
         for identity in unmatched:
             self.tracks[identity]["misses"]+=1

@@ -56,9 +56,13 @@ def simulate_detections(obstacles, observer_positions, maximum_range, noise_stdd
 
 class AlphaBetaTracker:
     """Per-ID constant-velocity tracker with bounded missed-detection lifetime."""
-    def __init__(self, alpha=0.75, beta=0.2, maximum_age=1.0):
+    def __init__(self, alpha=0.75, beta=0.2, maximum_age=1.5,
+                 occlusion_decay_per_s=0.7,minimum_confidence=0.15):
         self.alpha = float(alpha); self.beta = float(beta)
-        self.maximum_age = float(maximum_age); self.tracks = {}
+        self.maximum_age = float(maximum_age);self.occlusion_decay=float(occlusion_decay_per_s)
+        self.minimum_confidence=float(minimum_confidence);self.tracks = {}
+        if self.maximum_age<=0.0 or self.occlusion_decay<0.0 or not 0.0<=self.minimum_confidence<=1.0:
+            raise TrackingError("tracker lifetime and confidence parameters are invalid")
 
     def update(self, stamp, detections):
         stamp = float(stamp); seen = set()
@@ -73,9 +77,11 @@ class AlphaBetaTracker:
                 residual = [m-p for m, p in zip(measured, predicted)]
                 position = [p+self.alpha*r for p, r in zip(predicted, residual)]
                 velocity = [v+self.beta*r/dt for v, r in zip(previous["velocity"], residual)]
+            confidence=float(detection.get("confidence",1.0))
             self.tracks[identity] = {"id": identity, "position": position, "velocity": velocity,
                 "radius": float(detection.get("radius", 0.0)), "height": float(detection.get("height", 0.0)),
-                "confidence": float(detection.get("confidence", 1.0)), "stamp": stamp, "last_observed": stamp, "observed": True}
+                "confidence": confidence,"observed_confidence":confidence,"stamp": stamp,
+                "last_observed": stamp,"occluded_for_s":0.0,"observed": True}
             seen.add(identity)
         for identity, track in list(self.tracks.items()):
             age = stamp-track["last_observed"]
@@ -83,5 +89,7 @@ class AlphaBetaTracker:
             if age > self.maximum_age:
                 del self.tracks[identity]; continue
             track["position"] = [p+v*(stamp-track["stamp"]) for p, v in zip(track["position"], track["velocity"])]
-            track["stamp"] = stamp; track["confidence"] *= 0.8; track["observed"] = False
+            track["stamp"] = stamp;track["occluded_for_s"]=round(age,3)
+            track["confidence"]=max(self.minimum_confidence,track["observed_confidence"]*math.exp(-self.occlusion_decay*age))
+            track["observed"] = False
         return [dict(track) for _, track in sorted(self.tracks.items())]
