@@ -1,5 +1,5 @@
 import unittest
-from logistics_gazebo_sim.pointcloud_perception import VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles,target_sized_detections
+from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator,VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles,target_sized_detections
 
 
 class PointCloudPerceptionTest(unittest.TestCase):
@@ -18,5 +18,28 @@ class PointCloudPerceptionTest(unittest.TestCase):
         points=[(0.1*i,0,2) for i in range(10)]+[(10+0.1*i,0,2) for i in range(10)]
         clusters=euclidean_clusters(points,tolerance=0.25,minimum_points=5)
         self.assertEqual(len(clusters),2);self.assertEqual(cluster_detection("x",clusters[0])["point_count"],10)
+
+    def test_motion_consistency_rejects_static_jitter(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8)
+        self.assertEqual(model.update([{"position":[0,0,5]}],0.0),[])
+        self.assertEqual(model.update([{"position":[.05,0,5]}],.2),[])
+        self.assertEqual(model.update([{"position":[.02,0,5]}],.4),[])
+
+    def test_motion_consistency_confirms_moving_target(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8)
+        self.assertEqual(model.update([{"position":[0,0,5]}],0.0),[])
+        self.assertEqual(model.update([{"position":[.6,0,5]}],.2),[])
+        result=model.update([{"position":[1.2,.05,5]}],.4)
+        self.assertEqual(len(result),1);self.assertEqual(result[0]["motion_hits"],2)
+
+    def test_motion_consistency_rejects_direction_reversal(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8,minimum_direction_cosine=0.0)
+        model.update([{"position":[0,0,5]}],0.0);model.update([{"position":[.6,0,5]}],.2)
+        self.assertEqual(model.update([{"position":[0,0,5]}],.4),[])
+
+    def test_motion_consistency_rejects_abrupt_acceleration(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8,minimum_direction_cosine=0.0,maximum_acceleration=5.0)
+        model.update([{"position":[0,0,5]}],0.0);model.update([{"position":[.4,0,5]}],.2)
+        self.assertEqual(model.update([{"position":[1.2,0,5]}],.4),[])
 
 if __name__=="__main__":unittest.main()

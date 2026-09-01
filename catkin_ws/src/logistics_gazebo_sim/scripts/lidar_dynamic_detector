@@ -20,7 +20,7 @@ class LidarDynamicDetector:
         self.maximum_radius=float(rospy.get_param("~maximum_target_radius_m",1.4));self.maximum_height=float(rospy.get_param("~maximum_target_height_m",2.0))
         self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=2)
         self.status_publisher=rospy.Publisher("/perception/status",String,queue_size=2,latch=True)
-        self.associator=DetectionAssociator(rospy.get_param("~association_distance_m",1.8),rospy.get_param("~confirmation_hits",3),rospy.get_param("~maximum_misses",3))
+        self.associator=DetectionAssociator(rospy.get_param("~association_distance_m",1.8),rospy.get_param("~confirmation_hits",4),rospy.get_param("~maximum_misses",3),rospy.get_param("~minimum_motion_speed_mps",1.5),rospy.get_param("~maximum_motion_speed_mps",12.0),rospy.get_param("~minimum_motion_direction_cosine",0.7),rospy.get_param("~maximum_motion_acceleration_mps2",5.0))
         for index in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
         rospy.Subscriber("/perception/lidar_points",PointCloud2,self.cloud_cb,queue_size=1)
 
@@ -33,7 +33,7 @@ class LidarDynamicDetector:
         clusters=[] if self.frames<=self.warmup else euclidean_clusters(dynamic,self.tolerance,self.minimum)
         raw_candidates=[cluster_detection("candidate_{}".format(index),cluster) for index,cluster in enumerate(clusters)]
         candidates=target_sized_detections(raw_candidates,self.maximum_radius,self.maximum_height)
-        detections=self.associator.update(candidates)
+        detections=self.associator.update(candidates,message.header.stamp.to_sec())
         self.publisher.publish(json.dumps({"stamp":message.header.stamp.to_sec(),"frame_id":message.header.frame_id or "world","sensor":"gazebo_3d_lidar","detections":detections},separators=(",",":")))
         state="WARMING_UP" if self.frames<=self.warmup else "TRACKING"
         self.status_publisher.publish(json.dumps({"state":state,"source":"lidar","frame":self.frames,"warmup_frames":self.warmup,"raw_points":len(points),"dynamic_points":len(dynamic),"raw_clusters":len(raw_candidates),"rejected_oversized":len(raw_candidates)-len(candidates),"candidate_clusters":len(candidates),"confirmed_targets":len(detections)},separators=(",",":")))
