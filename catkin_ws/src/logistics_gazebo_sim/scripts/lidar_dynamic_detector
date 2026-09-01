@@ -36,7 +36,8 @@ class LidarDynamicDetector:
         detections=self.associator.update(candidates,message.header.stamp.to_sec())
         self.publisher.publish(json.dumps({"stamp":message.header.stamp.to_sec(),"frame_id":message.header.frame_id or "world","sensor":"gazebo_3d_lidar","detections":detections},separators=(",",":")))
         state="WARMING_UP" if self.frames<=self.warmup else "TRACKING"
-        self.status_publisher.publish(json.dumps({"state":state,"source":"lidar","frame":self.frames,"warmup_frames":self.warmup,"raw_points":len(points),"dynamic_points":len(dynamic),"raw_clusters":len(raw_candidates),"rejected_oversized":len(raw_candidates)-len(candidates),"candidate_clusters":len(candidates),"confirmed_targets":len(detections)},separators=(",",":")))
+        confidence=sum(item.get("confidence",0.0) for item in detections)/len(detections) if detections else 0.0
+        self.status_publisher.publish(json.dumps({"state":state,"source":"lidar","frame":self.frames,"warmup_frames":self.warmup,"raw_points":len(points),"dynamic_points":len(dynamic),"raw_clusters":len(raw_candidates),"rejected_oversized":len(raw_candidates)-len(candidates),"candidate_clusters":len(candidates),"confirmed_targets":len(detections),"mean_confidence":round(confidence,3)},separators=(",",":")))
 
 if __name__=="__main__":
     rospy.init_node("lidar_dynamic_detector");LidarDynamicDetector();rospy.spin()

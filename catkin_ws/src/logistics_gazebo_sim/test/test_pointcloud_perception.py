@@ -1,8 +1,11 @@
 import unittest
-from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator,VoxelBackground,cluster_detection,euclidean_clusters,exclude_near_vehicles,target_sized_detections
+from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator,VoxelBackground,calibrated_detection_confidence,cluster_detection,euclidean_clusters,exclude_near_vehicles,target_sized_detections
 
 
 class PointCloudPerceptionTest(unittest.TestCase):
+    def test_confidence_combines_point_support_and_motion(self):
+        self.assertEqual(calibrated_detection_confidence({"point_count":30},3,4),1.0)
+        self.assertAlmostEqual(calibrated_detection_confidence({"point_count":15},0,4),.325)
     def test_target_size_filter_rejects_building_fragments(self):
         detections=[{"id":"bird","radius":.75,"height":.8},{"id":"wall","radius":2.2,"height":.5}]
         self.assertEqual([item["id"] for item in target_sized_detections(detections)],["bird"])
