@@ -74,16 +74,20 @@ class DetectionAssociator:
     """Assign stable IDs and confirm only consistently moving observations."""
     def __init__(self,maximum_distance=1.8,confirmation_hits=3,maximum_misses=3,
                  minimum_speed=1.5,maximum_speed=12.0,
-                 minimum_direction_cosine=0.7,maximum_acceleration=5.0):
+                 minimum_direction_cosine=0.7,maximum_acceleration=5.0,
+                 maximum_track_age=None):
         self.maximum_distance=float(maximum_distance);self.confirmation_hits=int(confirmation_hits)
         self.maximum_misses=int(maximum_misses);self.minimum_speed=float(minimum_speed)
         self.maximum_speed=float(maximum_speed);self.minimum_direction_cosine=float(minimum_direction_cosine)
         self.maximum_acceleration=float(maximum_acceleration)
+        self.maximum_track_age=(None if maximum_track_age is None else float(maximum_track_age))
         if self.minimum_speed<0.0 or self.maximum_speed<=self.minimum_speed:
             raise ValueError("motion speed limits are invalid")
         if not -1.0<=self.minimum_direction_cosine<=1.0:
             raise ValueError("minimum direction cosine must be between -1 and 1")
         if self.maximum_acceleration<=0.0:raise ValueError("maximum acceleration must be positive")
+        if self.maximum_track_age is not None and self.maximum_track_age<=0.0:
+            raise ValueError("maximum track age must be positive")
         self.tracks={};self.sequence=0;self.frame=0
     def update(self,detections,stamp=None):
         self.frame+=1;stamp=float(self.frame*0.2 if stamp is None else stamp)
@@ -91,7 +95,9 @@ class DetectionAssociator:
         for detection in detections:
             best=None;distance=self.maximum_distance
             for identity in unmatched:
-                value=math.sqrt(sum((a-b)**2 for a,b in zip(detection["position"],self.tracks[identity]["position"])))
+                track=self.tracks[identity];dt=max(0.0,stamp-track["stamp"]);velocity=track.get("velocity") or (0.0,0.0,0.0)
+                predicted=[p+v*dt for p,v in zip(track["position"],velocity)]
+                value=math.sqrt(sum((a-b)**2 for a,b in zip(detection["position"],predicted)))
                 if value<distance:best,distance=identity,value
             if best is None:
                 best="lidar_target_{}".format(self.sequence);self.sequence+=1
@@ -117,6 +123,7 @@ class DetectionAssociator:
             output["confidence"]=calibrated_detection_confidence(output,track["motion_hits"],self.confirmation_hits)
             if track["hits"]>=self.confirmation_hits and track["motion_hits"]>=self.confirmation_hits-1:assigned.append(output)
         for identity in unmatched:
-            self.tracks[identity]["misses"]+=1
-            if self.tracks[identity]["misses"]>self.maximum_misses:del self.tracks[identity]
+            track=self.tracks[identity];track["misses"]+=1;age=stamp-track["stamp"]
+            expired=(age>self.maximum_track_age if self.maximum_track_age is not None else track["misses"]>self.maximum_misses)
+            if expired:del self.tracks[identity]
         return assigned

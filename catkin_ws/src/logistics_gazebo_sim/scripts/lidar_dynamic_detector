@@ -20,7 +20,7 @@ class LidarDynamicDetector:
         self.maximum_radius=float(rospy.get_param("~maximum_target_radius_m",1.4));self.maximum_height=float(rospy.get_param("~maximum_target_height_m",2.0))
         self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=2)
         self.status_publisher=rospy.Publisher("/perception/status",String,queue_size=2,latch=True)
-        self.associator=DetectionAssociator(rospy.get_param("~association_distance_m",1.8),rospy.get_param("~confirmation_hits",4),rospy.get_param("~maximum_misses",3),rospy.get_param("~minimum_motion_speed_mps",1.5),rospy.get_param("~maximum_motion_speed_mps",12.0),rospy.get_param("~minimum_motion_direction_cosine",0.7),rospy.get_param("~maximum_motion_acceleration_mps2",5.0))
+        self.associator=DetectionAssociator(rospy.get_param("~association_distance_m",1.8),rospy.get_param("~confirmation_hits",4),rospy.get_param("~maximum_misses",3),rospy.get_param("~minimum_motion_speed_mps",1.5),rospy.get_param("~maximum_motion_speed_mps",12.0),rospy.get_param("~minimum_motion_direction_cosine",0.7),rospy.get_param("~maximum_motion_acceleration_mps2",5.0),rospy.get_param("~maximum_association_age_s",1.5))
         for index in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
         rospy.Subscriber("/perception/lidar_points",PointCloud2,self.cloud_cb,queue_size=1)
 

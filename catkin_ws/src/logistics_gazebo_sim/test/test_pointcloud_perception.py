@@ -45,4 +45,17 @@ class PointCloudPerceptionTest(unittest.TestCase):
         model.update([{"position":[0,0,5]}],0.0);model.update([{"position":[.4,0,5]}],.2)
         self.assertEqual(model.update([{"position":[1.2,0,5]}],.4),[])
 
+    def test_prediction_preserves_id_across_short_occlusion(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8,minimum_direction_cosine=.5,maximum_track_age=1.5)
+        model.update([{"position":[0,0,5]}],0.0);model.update([{"position":[.6,0,5]}],.2)
+        confirmed=model.update([{"position":[1.2,0,5]}],.4);identity=confirmed[0]["id"]
+        model.update([],0.8);model.update([],1.2)
+        reacquired=model.update([{"position":[4.2,0,5]}],1.4)
+        self.assertEqual(reacquired[0]["id"],identity)
+
+    def test_prediction_expires_id_after_occlusion_limit(self):
+        model=DetectionAssociator(maximum_track_age=.5)
+        model.update([{"position":[0,0,5]}],0.0);model.update([],.6)
+        self.assertFalse(model.tracks)
+
 if __name__=="__main__":unittest.main()
