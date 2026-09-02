@@ -3,6 +3,7 @@
 import csv, json, math, os, time
 import rospy
 from logistics_gazebo_sim.fleet_config import validate_vehicle_count
+from logistics_gazebo_sim.track_metrics import summarize_tracks
 from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
@@ -17,11 +18,14 @@ class Recorder:
             "avoidance_offset_x","avoidance_offset_y","avoidance_offset_z",
             "avoidance_failure","avoidance_algorithm","orca_max_command_speed_mps","planner_viable","planner_reason","planner_time_ms","planner_rejections","mpc_viable","mpc_total_solve_ms","mpc_max_solve_ms","mpc_solver_retries","mpc_warm_started_vehicles","mpc_rejections","mpc_consensus_strength","predicted_separation_m","dynamic_clearance_m",
             "dynamic_time_to_conflict_s","safety_level","safety_message",
-            "min_separation_m","min_clearance_m","max_tracking_error_m"]
+            "min_separation_m","min_clearance_m","max_tracking_error_m",
+            "track_count","observed_track_count","mean_track_confidence","max_occlusion_s","track_ids"]
         for i in range(self.count):header += ["uav{}_x".format(i),"uav{}_y".format(i),"uav{}_z".format(i)]
         self.writer.writerow(header)
+        self.tracks={}
         self.state={"state":"INITIALIZING","stage":0,"progress":0.0};self.dynamic={};self.safety=["","","","",""];self.poses=[None]*self.count
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1);rospy.Subscriber("/fleet/dynamic_risk",String,self.dynamic_cb,queue_size=1)
+        rospy.Subscriber("/perception/dynamic_tracks",String,self.tracks_cb,queue_size=1)
         for i in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
         rospy.Timer(rospy.Duration(0.2),self.sample);rospy.on_shutdown(self.close);rospy.loginfo("Mission CSV: %s",self.path)
     def state_cb(self,msg):
@@ -33,9 +37,13 @@ class Recorder:
     def dynamic_cb(self,msg):
         try:self.dynamic=json.loads(msg.data)
         except ValueError:pass
+    def tracks_cb(self,msg):
+        try:self.tracks=json.loads(msg.data)
+        except ValueError:pass
 
     def pose_cb(self,msg,i):self.poses[i]=msg.pose.position
     def sample(self,_):
+        if self.handle.closed:return
         execution=self.state.get("avoidance_execution") or {}
         offset=list(execution.get("offset") or [0.0,0.0,0.0])+[0.0,0.0,0.0]
         separation=self.dynamic.get("fleet_separation") or {}
@@ -46,6 +54,7 @@ class Recorder:
         planner_reason=avoidance.get("reason","")
         planner_time=avoidance.get("planning_time_ms","")
         planner_rejections=json.dumps(avoidance.get("rejection_summary") or {},ensure_ascii=False,sort_keys=True)
+        track_metrics=summarize_tracks(self.tracks)
         mpc_viable=avoidance.get("viable","") if avoidance.get("algorithm")=="distributed_mpc" else ""
         mpc_retries=sum(1 for command in avoidance.get("commands",[]) if command.get("solver_retried")) if avoidance.get("algorithm")=="distributed_mpc" else ""
         mpc_warm=avoidance.get("warm_started_vehicle_count","") if avoidance.get("algorithm")=="distributed_mpc" else ""
@@ -58,7 +67,10 @@ class Recorder:
              execution.get("state",""),offset[0],offset[1],offset[2],
              execution.get("failure",""),execution.get("algorithm","") or avoidance.get("algorithm",""),max_orca_speed,planner_viable,planner_reason,planner_time,planner_rejections,mpc_viable,mpc_timing.get("total",""),mpc_timing.get("maximum",""),mpc_retries,mpc_warm,mpc_rejections,mpc_consensus,separation.get("minimum_separation_m",""),
              self.dynamic.get("minimum_clearance_m",""),
-             self.dynamic.get("time_to_conflict_s","")]+self.safety
+             self.dynamic.get("time_to_conflict_s","")]+self.safety+[
+             track_metrics["track_count"],track_metrics["observed_track_count"],
+             track_metrics["mean_track_confidence"],track_metrics["max_occlusion_s"],
+             track_metrics["track_ids"]]
         for p in self.poses:row += [p.x,p.y,p.z] if p else ["","",""]
         self.writer.writerow(row);self.handle.flush()
     def close(self):
