@@ -1,0 +1,8 @@
+<launch>
+  <arg name="report_path" default="/tmp/track_continuity_report.json"/>
+  <node pkg="logistics_gazebo_sim" type="dynamic_target_tracker" name="dynamic_target_tracker" output="screen"/>
+  <node pkg="logistics_gazebo_sim" type="track_continuity_trial" name="track_continuity_trial"
+        output="screen" required="true">
+    <param name="report_path" value="$(arg report_path)"/>
+  </node>
+</launch>

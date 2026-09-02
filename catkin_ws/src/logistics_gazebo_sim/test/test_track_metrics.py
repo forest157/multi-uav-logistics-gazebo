@@ -25,5 +25,25 @@ class TrackMetricsTest(unittest.TestCase):
         self.assertEqual(value["tracked_samples"],2);self.assertEqual(value["observed_samples"],1)
         self.assertEqual(value["occluded_samples"],1);self.assertEqual(value["mean_confidence"],.7)
         self.assertEqual(value["maximum_occlusion_s"],.8);self.assertEqual(value["unique_track_ids"],["bird"])
+        self.assertEqual(value["visibility_cycles"],1);self.assertEqual(value["continuous_visibility_cycles"],1)
+        self.assertEqual(value["id_switches_within_visibility_cycles"],0);self.assertEqual(value["id_continuity_rate"],1.0)
+
+    def test_detects_id_switch_only_within_a_visibility_cycle(self):
+        rows=[
+            {"track_count":"1","track_ids":'["a"]'},
+            {"track_count":"1","track_ids":'["b"]'},
+            {"track_count":"0","track_ids":"[]"},
+            {"track_count":"1","track_ids":'["c"]'},
+        ]
+        value=summarize_recorded_rows(rows)
+        self.assertEqual(value["visibility_cycles"],2)
+        self.assertEqual(value["continuous_visibility_cycles"],1)
+        self.assertEqual(value["id_switches_within_visibility_cycles"],1)
+        self.assertEqual(value["id_continuity_rate"],.5)
+
+    def test_empty_recording_has_no_visibility_cycles(self):
+        value=summarize_recorded_rows([])
+        self.assertEqual(value["visibility_cycles"],0)
+        self.assertEqual(value["id_continuity_rate"],0.0)
 
 if __name__=="__main__":unittest.main()
