@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Run a deterministic end-to-end short-occlusion track continuity trial."""
+import json
+import os
+import threading
+import time
+
+import rospy
+from std_msgs.msg import String
+from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator
+
+
+class ContinuityTrial:
+    def __init__(self):
+        self.outputs={};self.lock=threading.Lock()
+        self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=5)
+        rospy.Subscriber("/perception/dynamic_tracks",String,self.track_callback,queue_size=10)
+        self.associator=DetectionAssociator(maximum_distance=1.8,confirmation_hits=3,
+            maximum_misses=20,minimum_speed=.8,maximum_speed=12.0,
+            minimum_direction_cosine=.5,maximum_acceleration=5.0,maximum_track_age=1.5)
+
+    def track_callback(self,message):
+        try:
+            payload=json.loads(message.data)
+            with self.lock:self.outputs[round(float(payload["stamp"]),3)]=payload
+        except (TypeError,ValueError,KeyError):
+            rospy.logwarn("continuity trial ignored malformed tracker output")
+
+    def publish_sample(self,stamp,position=None):
+        raw=[] if position is None else [{"position":position,"radius":.4,"height":.5,"point_count":30}]
+        assigned=self.associator.update(raw,stamp)
+        payload={"stamp":stamp,"frame_id":"map","detections":assigned}
+        self.publisher.publish(json.dumps(payload,separators=(",",":")))
+        deadline=time.time()+1.0
+        while not rospy.is_shutdown() and time.time()<deadline:
+            with self.lock:
+                if round(stamp,3) in self.outputs:return
+            rospy.sleep(.01)
+        raise RuntimeError("tracker output timed out at stamp {:.1f}".format(stamp))
+
+    def run(self):
+        deadline=time.time()+5.0
+        while self.publisher.get_num_connections()<1 and not rospy.is_shutdown() and time.time()<deadline:
+            rospy.sleep(.05)
+        if self.publisher.get_num_connections()<1:raise RuntimeError("dynamic tracker did not subscribe")
+        samples=[(0.0,[0.,0.,2.]),(.2,[.6,0.,2.]),(.4,[1.2,0.,2.]),(.6,[1.8,0.,2.]),
+                 (.8,None),(1.0,None),(1.2,None),(1.4,[4.2,0.,2.])]
+        for stamp,position in samples:self.publish_sample(stamp,position)
+        with self.lock:outputs=dict(self.outputs)
+        original=self.observed_id(outputs.get(.6));reacquired=self.observed_id(outputs.get(1.4))
+        occluded=[]
+        for stamp in (.8,1.0,1.2):
+            occluded.extend(track for track in (outputs.get(stamp) or {}).get("obstacles",[]) if not track.get("observed",True))
+        report={"original_id":original,"reacquired_id":reacquired,"same_id":bool(original and original==reacquired),
+            "occluded_samples":len(occluded),"maximum_occlusion_s":round(max([float(x.get("occluded_for_s",0)) for x in occluded] or [0]),3)}
+        report["pass"]=report["same_id"] and report["occluded_samples"]==3 and report["maximum_occlusion_s"]>=.6
+        return report
+
+    @staticmethod
+    def observed_id(payload):
+        observed=[track for track in (payload or {}).get("obstacles",[]) if track.get("observed",True)]
+        return str(observed[0]["id"]) if len(observed)==1 else None
+
+
+if __name__=="__main__":
+    rospy.init_node("track_continuity_trial")
+    output_path=rospy.get_param("~report_path","")
+    try:report=ContinuityTrial().run()
+    except Exception as error:
+        report={"pass":False,"error":str(error)}
+    rendered=json.dumps(report,sort_keys=True,indent=2)
+    if output_path:
+        directory=os.path.dirname(os.path.abspath(output_path))
+        if not os.path.isdir(directory):os.makedirs(directory)
+        with open(output_path,"w") as stream:stream.write(rendered+"\n")
+    rospy.loginfo("track continuity report: %s",json.dumps(report,sort_keys=True))
+    if not report.get("pass"):raise SystemExit(1)
