@@ -98,7 +98,9 @@ def choose_alternate_landing_site(position,other_positions,primitives,world_limi
         if max(abs(candidate[0]),abs(candidate[1]))>world_limit:continue
         if any(math.hypot(candidate[0]-other[0],candidate[1]-other[1])<min_separation for other in other_positions):continue
         if any(_footprint_distance(candidate,primitive)<footprint_clearance for primitive in primitives):continue
-        if _level_approach_clear(start,candidate,primitives,footprint_clearance):return tuple(round(value,3) for value in candidate)
+        if (_level_approach_clear(start,candidate,primitives,footprint_clearance) and
+                _approach_separated(start,candidate,other_positions,min_separation)):
+            return tuple(round(value,3) for value in candidate)
     return None
 
 
@@ -112,4 +114,11 @@ def _level_approach_clear(start,landing,primitives,clearance):
     for step in range(21):
         ratio=step/20.;point=(start[0]+(landing[0]-start[0])*ratio,start[1]+(landing[1]-start[1])*ratio,start[2])
         if any(point[2]<=primitive["height"]+.8 and _footprint_distance(point,primitive)<clearance for primitive in primitives):return False
+    return True
+
+
+def _approach_separated(start,landing,others,minimum):
+    for step in range(21):
+        ratio=step/20.;point=(start[0]+(landing[0]-start[0])*ratio,start[1]+(landing[1]-start[1])*ratio,start[2])
+        if any(math.dist(point,tuple(float(value) for value in other))<minimum for other in others):return False
     return True
