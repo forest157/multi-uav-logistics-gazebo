@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Estimate per-vehicle energy from MAVROS motion and battery telemetry."""
+import json,math,os
+import rospy,rospkg,yaml
+from geometry_msgs.msg import TwistStamped
+from sensor_msgs.msg import BatteryState
+from std_msgs.msg import String
+from logistics_gazebo_sim.energy_model import EnergyEstimator,EnergyModel,mission_energy_forecast
+from logistics_gazebo_sim.fleet_config import validate_vehicle_count
+
+class FleetEnergyMonitor:
+    def __init__(self):
+        self.count=validate_vehicle_count(rospy.get_param("~vehicle_count",3));capacities=list(rospy.get_param("~capacity_wh",[220.0]*self.count))
+        if len(capacities)!=self.count:raise ValueError("capacity_wh must match vehicle_count")
+        self.model=EnergyModel(rospy.get_param("~hover_power_w",180.0),rospy.get_param("~horizontal_w_per_mps2",18.0),rospy.get_param("~climb_w_per_mps",80.0),rospy.get_param("~descent_w_per_mps",20.0),rospy.get_param("~acceleration_w_per_mps2",12.0),rospy.get_param("~turn_w_per_rad_s",8.0),rospy.get_param("~payload_w_per_kg",25.0))
+        reserve=float(rospy.get_param("~reserve_fraction",.2));self.estimators=[EnergyEstimator(self.model,value,reserve) for value in capacities]
+        self.velocities=[(0.,0.,0.)]*self.count;self.batteries=[None]*self.count;self.state={"progress":0.0,"phase":"INITIALIZING"}
+        default=os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim"),"config","mission_scene0.yaml")
+        with open(rospy.get_param("~mission_config",default),encoding="utf-8") as stream:self.config=yaml.safe_load(stream)
+        self.payload_mass=float(rospy.get_param("~payload_mass_kg",.5));self.wait_s=float(rospy.get_param("~reserve_wait_s",60.0))
+        for i in range(self.count):
+            rospy.Subscriber("/uav{}/mavros/local_position/velocity_local".format(i),TwistStamped,self.velocity_cb,callback_args=i,queue_size=1)
+            rospy.Subscriber("/uav{}/mavros/battery".format(i),BatteryState,self.battery_cb,callback_args=i,queue_size=1)
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);self.publisher=rospy.Publisher("/fleet/energy_state",String,queue_size=2,latch=True)
+    def velocity_cb(self,msg,index):
+        value=msg.twist.linear;self.velocities[index]=(value.x,value.y,value.z)
+    def battery_cb(self,msg,index):
+        self.batteries[index]={"voltage_v":round(float(msg.voltage),3) if math.isfinite(msg.voltage) else None,"percentage":round(float(msg.percentage),4) if math.isfinite(msg.percentage) and msg.percentage>=0 else None}
+    def state_cb(self,msg):
+        try:self.state=json.loads(msg.data)
+        except (TypeError,ValueError):pass
+    def report(self):
+        now=rospy.get_time();progress=max(0.,min(1.,float(self.state.get("progress",0))));stages=self.config["stages"]
+        remaining=float(stages["descent_end"])*(1.-progress);return_s=max(0.,float(stages["return_end"])-float(stages["delivery_hold_end"]))
+        payload=0.0 if str(self.state.get("phase","")) in ("CRUISE_REFORMATION","RETURN","HOME_FORMATION","HOME_DESCENT") else self.payload_mass
+        complete=progress>=1.0 or str(self.state.get("state",""))=="COMPLETE"
+        forecast=mission_energy_forecast(self.model,remaining,min(remaining,return_s),0.0 if complete else self.wait_s,0.0 if complete else float(self.config["cruise_altitude"]),payload_kg=payload)
+        vehicles=[]
+        for i,(estimator,velocity) in enumerate(zip(self.estimators,self.velocities)):
+            value=estimator.update(now,velocity,payload);value.update(forecast);value["vehicle_id"]="uav{}".format(i);value["payload_kg"]=payload
+            value["reserve_safe"]=value["usable_margin_wh"]>=forecast["required_to_land_wh"];value["mavros_battery"]=self.batteries[i];vehicles.append(value)
+        return {"stamp":round(now,3),"model_version":"energy_v1","calibration":"simulation_baseline_unfitted",
+            "mission_state":str(self.state.get("state","")),"mission_phase":str(self.state.get("phase","")),"mission_progress":progress,
+            "vehicles":vehicles,"all_reserve_safe":all(value["reserve_safe"] for value in vehicles)}
+    def run(self):
+        rate=rospy.Rate(2)
+        while not rospy.is_shutdown():self.publisher.publish(json.dumps(self.report(),separators=(",",":")));rate.sleep()
+
+if __name__=="__main__":rospy.init_node("fleet_energy_monitor");FleetEnergyMonitor().run()

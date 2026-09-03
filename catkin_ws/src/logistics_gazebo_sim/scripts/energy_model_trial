@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Inject deterministic motion and verify the ROS fleet energy report."""
+import json,os,time
+import rospy
+from geometry_msgs.msg import TwistStamped
+from sensor_msgs.msg import BatteryState
+from std_msgs.msg import String
+
+class EnergyTrial:
+    def __init__(self):
+        self.report={};self.state_pub=rospy.Publisher("/fleet/mission_state",String,queue_size=2)
+        self.velocity_pubs=[rospy.Publisher("/uav{}/mavros/local_position/velocity_local".format(i),TwistStamped,queue_size=2) for i in range(3)]
+        self.battery_pubs=[rospy.Publisher("/uav{}/mavros/battery".format(i),BatteryState,queue_size=2) for i in range(3)]
+        rospy.Subscriber("/fleet/energy_state",String,self.callback,queue_size=5)
+    def callback(self,msg):
+        try:self.report=json.loads(msg.data)
+        except (TypeError,ValueError):pass
+    def publish(self,phase="OUTBOUND",duration=.7,progress=.4,state="RUNNING"):
+        deadline=time.time()+duration
+        while time.time()<deadline and not rospy.is_shutdown():
+            self.state_pub.publish(json.dumps({"progress":progress,"phase":phase,"state":state}))
+            for i,pub in enumerate(self.velocity_pubs):
+                msg=TwistStamped();msg.twist.linear.x=1.0+i*.2;msg.twist.linear.z=.1;pub.publish(msg)
+                battery=BatteryState();battery.voltage=16.0-i*.2;battery.percentage=.8-i*.1;self.battery_pubs[i].publish(battery)
+            rospy.sleep(.05)
+        deadline=time.time()+2.
+        while time.time()<deadline and self.report.get("mission_phase")!=phase and not rospy.is_shutdown():rospy.sleep(.05)
+    def run(self):
+        deadline=time.time()+5.
+        while any(pub.get_num_connections()<1 for pub in self.velocity_pubs) and time.time()<deadline:rospy.sleep(.05)
+        self.publish();loaded=dict(self.report);self.publish("RETURN");returned=dict(self.report)
+        self.publish("HOME_DESCENT",progress=1.,state="COMPLETE");completed=dict(self.report)
+        vehicles=loaded.get("vehicles") or [];return_vehicles=returned.get("vehicles") or [];complete_vehicles=completed.get("vehicles") or []
+        report={"vehicle_count":len(vehicles),"capacities_wh":[v.get("capacity_wh") for v in vehicles],
+            "used_energy_recorded":all(v.get("used_wh",0)>0 for v in vehicles),
+            "forecasts_present":all(v.get("required_to_land_wh",0)>0 for v in vehicles),
+            "mavros_battery_present":all(v.get("mavros_battery") is not None for v in vehicles),
+            "payload_released":len(return_vehicles)==3 and all(v.get("payload_kg")==0 for v in return_vehicles),
+            "complete_requirement_zero":len(complete_vehicles)==3 and all(v.get("required_to_land_wh")==0 for v in complete_vehicles)}
+        report["pass"]=(report["vehicle_count"]==3 and report["capacities_wh"]==[220.0,210.0,200.0] and all(report[k] for k in ("used_energy_recorded","forecasts_present","mavros_battery_present","payload_released","complete_requirement_zero")))
+        return report
+
+if __name__=="__main__":
+    rospy.init_node("energy_model_trial");path=rospy.get_param("~report_path","")
+    try:report=EnergyTrial().run()
+    except Exception as error:report={"pass":False,"error":str(error)}
+    rendered=json.dumps(report,sort_keys=True,indent=2)
+    if path:
+        directory=os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(directory):os.makedirs(directory)
+        with open(path,"w") as stream:stream.write(rendered+"\n")
+    rospy.loginfo("energy model report: %s",json.dumps(report,sort_keys=True))
+    if not report.get("pass"):raise SystemExit(1)
