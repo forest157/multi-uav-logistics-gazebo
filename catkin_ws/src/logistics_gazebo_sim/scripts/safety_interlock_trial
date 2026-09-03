@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Exercise the mission player's measured-separation interlock over ROS topics."""
+import json
+import os
+import threading
+import time
+
+import rospy
+from diagnostic_msgs.msg import DiagnosticArray,DiagnosticStatus
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+
+
+class SafetyInterlockTrial:
+    def __init__(self):
+        self.lock=threading.Lock();self.state=None;self.targets=[None]*3
+        self.pose_pubs=[rospy.Publisher("/uav{}/mavros/local_position/pose".format(i),PoseStamped,queue_size=2) for i in range(3)]
+        self.diag_pub=rospy.Publisher("/fleet/diagnostics",DiagnosticArray,queue_size=2)
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=5)
+        for i in range(3):rospy.Subscriber("/uav{}/target_pose".format(i),PoseStamped,self.target_cb,callback_args=i,queue_size=5)
+
+    def state_cb(self,message):
+        try:
+            with self.lock:self.state=json.loads(message.data)
+        except (TypeError,ValueError):pass
+
+    def target_cb(self,message,index):
+        value=message.pose.position
+        with self.lock:self.targets[index]=(value.x,value.y,value.z)
+
+    def publish(self,local_x,diagnostic_level=DiagnosticStatus.OK,duration=.3):
+        deadline=time.time()+duration
+        while not rospy.is_shutdown() and time.time()<deadline:
+            stamp=rospy.Time.now()
+            for publisher,x in zip(self.pose_pubs,local_x):
+                message=PoseStamped();message.header.stamp=stamp;message.header.frame_id="map"
+                message.pose.position.x=x;message.pose.position.z=5.0;message.pose.orientation.w=1.0
+                publisher.publish(message)
+            status=DiagnosticStatus(level=diagnostic_level,name="logistics_fleet/safety",message="trial",hardware_id="trial")
+            self.diag_pub.publish(DiagnosticArray(status=[status]));rospy.sleep(.05)
+
+    def snapshot(self):
+        with self.lock:return dict(self.state or {}),list(self.targets)
+
+    def wait_hold(self,expected,timeout=2.0):
+        deadline=time.time()+timeout
+        while not rospy.is_shutdown() and time.time()<deadline:
+            state,_=self.snapshot()
+            if bool((state.get("safety_interlock") or {}).get("hold"))==expected:return state
+            rospy.sleep(.02)
+        raise RuntimeError("interlock did not reach hold={}".format(expected))
+
+    def run(self):
+        deadline=time.time()+5.0
+        while (any(pub.get_num_connections()<1 for pub in self.pose_pubs) or self.diag_pub.get_num_connections()<1) and time.time()<deadline:
+            rospy.sleep(.05)
+        self.publish([0.,0.,0.],DiagnosticStatus.STALE,.4)
+        stale_state=self.wait_hold(False)
+        self.publish([0.,-.8,0.],DiagnosticStatus.OK,.4)
+        held_state=self.wait_hold(True);rospy.sleep(.15)
+        _,held_targets=self.snapshot()
+        locked=held_targets[1] is not None and abs(held_targets[1][0]+.8)<.05 and abs(held_targets[1][2]-5.0)<.05
+        self.publish([0.,0.,0.],DiagnosticStatus.OK,1.25)
+        released_state=self.wait_hold(False)
+        report={"stale_triggered":bool((stale_state.get("safety_interlock") or {}).get("hold")),
+            "close_minimum_separation_m":(held_state.get("safety_interlock") or {}).get("minimum_separation_m"),
+            "hold_triggered":True,"targets_locked":locked,
+            "released":not bool((released_state.get("safety_interlock") or {}).get("hold"))}
+        report["pass"]=(not report["stale_triggered"] and report["hold_triggered"] and
+            report["targets_locked"] and report["released"] and report["close_minimum_separation_m"]<2.7)
+        return report
+
+
+if __name__=="__main__":
+    rospy.init_node("safety_interlock_trial")
+    path=rospy.get_param("~report_path","")
+    try:report=SafetyInterlockTrial().run()
+    except Exception as error:report={"pass":False,"error":str(error)}
+    rendered=json.dumps(report,sort_keys=True,indent=2)
+    if path:
+        directory=os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(directory):os.makedirs(directory)
+        with open(path,"w") as stream:stream.write(rendered+"\n")
+    rospy.loginfo("safety interlock report: %s",json.dumps(report,sort_keys=True))
+    if not report.get("pass"):raise SystemExit(1)
