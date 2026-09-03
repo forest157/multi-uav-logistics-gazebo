@@ -1,0 +1,11 @@
+<launch>
+  <arg name="report_path" default="/tmp/perception_stale_report.json"/>
+  <node pkg="logistics_gazebo_sim" type="fleet_mission_player" name="fleet_mission_player" output="screen">
+    <param name="auto_start" value="false"/><param name="dynamic_safety_enabled" value="true"/>
+    <param name="dynamic_avoidance_execution" value="false"/>
+    <param name="perception_stale_hold_delay_s" value="2.0"/><param name="dynamic_release_delay_s" value="2.0"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="perception_stale_trial" name="perception_stale_trial" output="screen" required="true">
+    <param name="report_path" value="$(arg report_path)"/>
+  </node>
+</launch>
