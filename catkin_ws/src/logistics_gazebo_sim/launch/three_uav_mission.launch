@@ -109,6 +109,11 @@
   </node>
   <node pkg="logistics_gazebo_sim" type="fleet_visualizer" name="fleet_visualizer" output="screen"><param name="vehicle_count" value="$(arg vehicle_count)"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/></node>
   <node pkg="logistics_gazebo_sim" type="mission_recorder" name="mission_recorder" output="screen"><param name="vehicle_count" value="$(arg vehicle_count)"/></node>
+  <node pkg="logistics_gazebo_sim" type="fleet_energy_monitor" name="fleet_energy_monitor" output="screen">
+    <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="mission_config" value="$(arg mission_config)"/>
+    <rosparam param="capacity_wh">[220.0, 210.0, 200.0]</rosparam>
+    <param name="reserve_fraction" value="0.20"/><param name="payload_mass_kg" value="0.50"/><param name="reserve_wait_s" value="60.0"/>
+  </node>
   <node pkg="logistics_gazebo_sim" type="parcel_delivery_manager" name="parcel_delivery_manager" output="screen"><param name="vehicle_count" value="$(arg vehicle_count)"/></node>
   <node pkg="logistics_gazebo_sim" type="gazebo_marker_sync" name="gazebo_marker_sync" output="screen"><param name="start_x" value="$(arg spawn_x)"/><param name="start_y" value="$(arg spawn_y)"/><param name="goal_x" value="$(arg goal_x)"/><param name="goal_y" value="$(arg goal_y)"/></node>
 </launch>

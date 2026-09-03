@@ -1,0 +1,13 @@
+<launch>
+  <arg name="report_path" default="/tmp/energy_model_report.json"/>
+  <node pkg="logistics_gazebo_sim" type="fleet_energy_monitor" name="fleet_energy_monitor" output="screen">
+    <param name="vehicle_count" value="3"/><rosparam param="capacity_wh">[220.0, 210.0, 200.0]</rosparam>
+    <param name="reserve_fraction" value="0.20"/><param name="payload_mass_kg" value="0.50"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="mission_recorder" name="mission_recorder" output="screen">
+    <param name="vehicle_count" value="3"/><param name="output_dir" value="/tmp/v059_energy_csv"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="energy_model_trial" name="energy_model_trial" output="screen" required="true">
+    <param name="report_path" value="$(arg report_path)"/>
+  </node>
+</launch>
