@@ -15,7 +15,7 @@ class EnergyReturnPolicy:
             raise ValueError("invalid energy return thresholds")
         self.levels={}
 
-    def update(self,report,now,positions=None,home_slots=None,phase=""):
+    def update(self,report,now,positions=None,home_slots=None,phase="",min_separation=3.3):
         stamp=float(report.get("stamp",-math.inf));age=max(0.0,float(now)-stamp)
         vehicles=list(report.get("vehicles") or [])
         if not vehicles or not math.isfinite(stamp) or age>self.stale_after:
@@ -34,7 +34,7 @@ class EnergyReturnPolicy:
         fleet=max((value["level"] for value in assessments),key=lambda value:LEVELS[value])
         assignments={};open_air=phase in ("CRUISE_REFORMATION","RETURN")
         if open_air and positions and home_slots and len(positions)==len(home_slots)==len(assessments):
-            assignments=assign_return_slots(assessments,positions,home_slots)
+            assignments=assign_return_slots(assessments,positions,home_slots,min_separation)
         landing=[value["vehicle_id"] for value in sorted(assessments,key=lambda value:value["final_margin_wh"])]
         action="ALTERNATE_LANDING_RECOMMENDED" if fleet=="CRITICAL" else "RETURN_RECOMMENDED" if fleet=="LOW" else "MONITOR"
         return self._result(fleet,age,assessments,assignments,landing,action)
@@ -52,7 +52,7 @@ class EnergyReturnPolicy:
             "control_applied":False}
 
 
-def assign_return_slots(assessments,positions,home_slots):
+def assign_return_slots(assessments,positions,home_slots,min_separation=3.3):
     """Assign scarce short routes preferentially to aircraft with less energy."""
     count=len(assessments)
     if count>8:raise ValueError("slot assignment supports at most eight vehicles")
@@ -60,10 +60,19 @@ def assign_return_slots(assessments,positions,home_slots):
     weights={vehicle:float(count-rank) for rank,vehicle in enumerate(ranked)}
     best=None
     for permutation in itertools.permutations(range(count)):
+        if not _transition_safe(positions,home_slots,permutation,float(min_separation)):continue
         cost=sum(weights[i]*_route_cost(positions[i],home_slots[permutation[i]]) for i in range(count))
         candidate=(round(cost,9),permutation)
         if best is None or candidate<best:best=candidate
-    return {assessments[i]["vehicle_id"]:int(best[1][i]) for i in range(count)}
+    return {} if best is None else {assessments[i]["vehicle_id"]:int(best[1][i]) for i in range(count)}
+
+
+def _transition_safe(positions,slots,permutation,min_separation):
+    for step in range(21):
+        ratio=step/20.0
+        values=[tuple(float(start[a])+(float(slots[permutation[i]][a])-float(start[a]))*ratio for a in range(3)) for i,start in enumerate(positions)]
+        if any(math.dist(values[i],values[j])<min_separation for i in range(len(values)) for j in range(i+1,len(values))):return False
+    return True
 
 
 def _route_cost(position,slot):

@@ -27,15 +27,19 @@ class EnergyReturnPolicyTest(unittest.TestCase):
         self.assertEqual(policy.update(report(2,[-1]),2)["fleet_level"],"CRITICAL")
     def test_lowest_energy_gets_shortest_weighted_route(self):
         assessments=EnergyReturnPolicy().update(report(1,[2,40,50]),1)["vehicles"]
-        slots=assign_return_slots(assessments,[(0,0,8),(0,0,8),(0,0,8)],[(20,0,0),(5,0,0),(10,0,0)])
+        slots=assign_return_slots(assessments,[(0,0,8),(0,0,8),(0,0,8)],[(20,0,0),(5,0,0),(10,0,0)],min_separation=0.0)
         self.assertEqual(slots["uav0"],1)
     def test_slots_only_recommended_in_open_return_airspace(self):
-        policy=EnergyReturnPolicy();args=(report(1,[5,30]),1,[(0,0,8)]*2,[(10,0,0),(5,0,0)])
+        policy=EnergyReturnPolicy();args=(report(1,[5,30]),1,[(0,0,8),(4,0,8)],[(10,0,0),(14,0,0)])
         self.assertEqual(policy.update(*args,phase="DELIVERY_DESCENT")["slot_assignments"],{})
         self.assertTrue(policy.update(*args,phase="RETURN")["slot_assignments"])
     def test_landing_order_prioritizes_low_margin(self):
         value=EnergyReturnPolicy().update(report(1,[20,-1,5]),1)
         self.assertEqual(value["landing_order"],["uav1","uav2","uav0"])
+    def test_crossing_slot_exchange_is_rejected(self):
+        assessments=EnergyReturnPolicy().update(report(1,[1,20]),1)["vehicles"]
+        slots=assign_return_slots(assessments,[(-2,0,0),(2,0,0)],[(2,0,0),(-2,0,0)],min_separation=1.0)
+        self.assertEqual(slots,{"uav0":1,"uav1":0})
 
 
 if __name__=="__main__":unittest.main()
