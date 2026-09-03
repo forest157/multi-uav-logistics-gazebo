@@ -1,0 +1,15 @@
+<launch>
+  <arg name="report_path" default="/tmp/safety_interlock_report.json"/>
+  <node pkg="logistics_gazebo_sim" type="fleet_mission_player" name="fleet_mission_player" output="screen">
+    <param name="auto_start" value="false"/>
+    <param name="dynamic_safety_enabled" value="false"/>
+    <param name="spawn_spacing_m" value="3.3"/>
+    <param name="safety_hold_separation_m" value="2.7"/>
+    <param name="safety_release_separation_m" value="3.0"/>
+    <param name="safety_release_delay_s" value="1.0"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="safety_interlock_trial" name="safety_interlock_trial"
+        output="screen" required="true">
+    <param name="report_path" value="$(arg report_path)"/>
+  </node>
+</launch>
