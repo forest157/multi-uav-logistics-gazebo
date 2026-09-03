@@ -91,7 +91,7 @@ class MissionPlayer:
             confirmation_s=float(rospy.get_param("~avoidance_confirmation_s",0.6)),
             apply_s=float(rospy.get_param("~avoidance_apply_s",4.0)),
             recover_s=float(rospy.get_param("~avoidance_recover_s",4.0)));self.avoidance_command=self.avoidance_execution.command(rospy.get_time())
-        self.dynamic_response=DynamicSafetyResponse(rospy.get_param("~dynamic_warning_scale",0.35),rospy.get_param("~dynamic_release_delay_s",2.0))
+        self.dynamic_response=DynamicSafetyResponse(rospy.get_param("~dynamic_warning_scale",0.35),rospy.get_param("~dynamic_release_delay_s",2.0),rospy.get_param("~perception_stale_hold_delay_s",2.0))
         self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE"
         self.dynamic_hold_targets=None
         self.dynamic_obstacle_count=0

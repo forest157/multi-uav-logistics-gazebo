@@ -105,11 +105,19 @@ class DynamicObstacleTest(unittest.TestCase):
         self.assertEqual(response.update("SAFE", 3.0)["action"], "HOLD")
         self.assertEqual(response.update("SAFE", 5.0)["action"], "NORMAL")
 
-    def test_stale_does_not_create_new_hold(self):
-        response = DynamicSafetyResponse()
-        value = response.update("STALE", 1.0)
-        self.assertEqual(value["action"], "NORMAL")
-        self.assertEqual(value["speed_scale"], 1.0)
+    def test_stale_slows_then_holds_and_requires_safe_release(self):
+        response = DynamicSafetyResponse(warning_scale=.35,release_delay=1.0,stale_hold_delay=2.0)
+        self.assertEqual(response.update("STALE",1.0)["action"],"SLOW")
+        self.assertEqual(response.update("STALE",2.9)["action"],"SLOW")
+        self.assertEqual(response.update("STALE",3.0)["action"],"HOLD")
+        self.assertEqual(response.update("SAFE",3.2)["action"],"HOLD")
+        self.assertEqual(response.update("SAFE",4.2)["action"],"NORMAL")
+
+    def test_stale_timer_resets_after_fresh_risk(self):
+        response=DynamicSafetyResponse(stale_hold_delay=1.0)
+        response.update("STALE",0.0);response.update("SAFE",.5)
+        self.assertEqual(response.update("STALE",1.0)["action"],"SLOW")
+        self.assertEqual(response.update("STALE",1.9)["action"],"SLOW")
 
 
     def fleet_paths(self):

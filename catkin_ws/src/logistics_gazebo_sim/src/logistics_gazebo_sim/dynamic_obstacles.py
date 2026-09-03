@@ -165,15 +165,21 @@ def assess_timed_path(path, obstacles, horizon=8.0, sample_period=0.2,
 
 class DynamicSafetyResponse:
     """Convert noisy risk levels into fleet-wide speed/hold commands."""
-    def __init__(self, warning_scale=0.35, release_delay=2.0):
+    def __init__(self, warning_scale=0.35, release_delay=2.0,
+                 stale_hold_delay=2.0):
         self.warning_scale = float(warning_scale)
         self.release_delay = float(release_delay)
+        self.stale_hold_delay = float(stale_hold_delay)
+        if not 0.0 < self.warning_scale <= 1.0 or min(self.release_delay,self.stale_hold_delay) < 0.0:
+            raise DynamicObstacleError("dynamic safety response limits are invalid")
         self.hold_latched = False
         self.clear_since = None
+        self.stale_since = None
 
     def reset(self):
         self.hold_latched = False
         self.clear_since = None
+        self.stale_since = None
 
     def update(self, level, now):
         level = str(level).upper()
@@ -181,7 +187,13 @@ class DynamicSafetyResponse:
         if level == "CRITICAL":
             self.hold_latched = True
             self.clear_since = None
-        elif self.hold_latched:
+            self.stale_since = None
+        elif level == "STALE":
+            if self.stale_since is None:self.stale_since=now
+            if now-self.stale_since>=self.stale_hold_delay:self.hold_latched=True
+            self.clear_since=None
+        else:self.stale_since=None
+        if self.hold_latched and level != "CRITICAL":
             if level == "SAFE":
                 if self.clear_since is None:
                     self.clear_since = now
@@ -195,6 +207,9 @@ class DynamicSafetyResponse:
             return {"action": "HOLD", "speed_scale": 0.0,
                     "risk_level": level}
         if level == "WARNING":
+            return {"action": "SLOW", "speed_scale": self.warning_scale,
+                    "risk_level": level}
+        if level == "STALE":
             return {"action": "SLOW", "speed_scale": self.warning_scale,
                     "risk_level": level}
         return {"action": "NORMAL", "speed_scale": 1.0,

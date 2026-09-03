@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Verify perception STALE degradation through the live mission-state topic."""
+import json,os,time
+import rospy
+from std_msgs.msg import String
+
+class StaleTrial:
+    def __init__(self):
+        self.state={};self.publisher=rospy.Publisher("/fleet/dynamic_risk",String,queue_size=2)
+        rospy.Subscriber("/fleet/mission_state",String,self.callback,queue_size=5)
+    def callback(self,message):
+        try:self.state=json.loads(message.data)
+        except (TypeError,ValueError):pass
+    def send(self,level,duration):
+        deadline=time.time()+duration
+        while time.time()<deadline and not rospy.is_shutdown():
+            self.publisher.publish(json.dumps({"level":level,"obstacle_count":0,"avoidance":{}}));rospy.sleep(.05)
+    def wait_action(self,action,timeout=.5):
+        deadline=time.time()+timeout
+        while time.time()<deadline and not rospy.is_shutdown():
+            if self.state.get("dynamic_action")==action:return True
+            rospy.sleep(.02)
+        return False
+    def run(self):
+        deadline=time.time()+5.
+        while self.publisher.get_num_connections()<1 and time.time()<deadline:rospy.sleep(.05)
+        self.send("STALE",.4);slowed=self.wait_action("SLOW")
+        self.send("STALE",1.8);held=self.wait_action("HOLD")
+        self.send("SAFE",.4);release_delayed=self.state.get("dynamic_action")=="HOLD"
+        self.send("SAFE",1.8);released=self.wait_action("NORMAL")
+        report={"slowed":slowed,"held":held,"release_delayed":release_delayed,"released":released}
+        report["pass"]=all(report.values());return report
+
+if __name__=="__main__":
+    rospy.init_node("perception_stale_trial");path=rospy.get_param("~report_path","")
+    try:report=StaleTrial().run()
+    except Exception as error:report={"pass":False,"error":str(error)}
+    rendered=json.dumps(report,sort_keys=True,indent=2)
+    if path:
+        directory=os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(directory):os.makedirs(directory)
+        with open(path,"w") as stream:stream.write(rendered+"\n")
+    rospy.loginfo("perception stale report: %s",json.dumps(report,sort_keys=True))
+    if not report.get("pass"):raise SystemExit(1)
