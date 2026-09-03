@@ -1,0 +1,11 @@
+<launch>
+  <arg name="report_path" default="/tmp/v0510_energy_landing_report.json"/>
+  <node pkg="logistics_gazebo_sim" type="fleet_mission_player" name="fleet_mission_player" output="screen">
+    <param name="auto_start" value="true"/><param name="spawn_spacing_m" value="3.3"/>
+    <param name="energy_return_control_mode" value="limited"/><param name="energy_landing_stagger_s" value="2.0"/>
+    <param name="mission_time_scale" value="50.0"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="energy_landing_trial" name="energy_landing_trial" output="screen" required="true">
+    <param name="report_path" value="$(arg report_path)"/>
+  </node>
+</launch>
