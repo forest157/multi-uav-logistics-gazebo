@@ -20,19 +20,22 @@ class LandingTrial:
         except ValueError:pass
     def target_cb(self,msg,index):self.targets[index]=msg.pose.position.z
     def run(self):
-        deadline=time.time()+15.;captured=None
+        deadline=time.time()+15.;captured=None;diversion_observed=False
         while time.time()<deadline and not rospy.is_shutdown():
             for i in range(3):
                 state=State();state.connected=True;state.armed=True;state.mode="OFFBOARD";self.states[i].publish(state)
                 pose=PoseStamped();pose.pose.position.z=8.;self.poses[i].publish(pose)
-            self.advisory.publish(json.dumps({"landing_order":["uav2","uav1","uav0"]}))
+            self.advisory.publish(json.dumps({"fleet_level":"CRITICAL","landing_order":["uav2","uav1","uav0"],
+                "alternate_landing":{"vehicle_id":"uav2","local_point":[0.,0.,.18]}}))
             execution=self.state.get("energy_return_execution") or {}
+            if self.state.get("phase")=="RETURN" and execution.get("diversion_state")=="DESCENT" and execution.get("control_applied"):diversion_observed=True
             if self.state.get("phase")=="HOME_DESCENT" and execution.get("control_applied") and all(value is not None for value in self.targets):
                 if self.targets[2]<self.targets[1]<self.targets[0]:captured=list(self.targets);break
             rospy.sleep(.02)
         result={"home_descent_reached":self.state.get("phase")=="HOME_DESCENT","control_applied":bool((self.state.get("energy_return_execution") or {}).get("control_applied")),
             "priority_order_observed":captured is not None,"target_altitudes":captured or self.targets}
-        result["pass"]=all(result[key] for key in ("home_descent_reached","control_applied","priority_order_observed"));return result
+        result["critical_diversion_observed"]=diversion_observed
+        result["pass"]=all(result[key] for key in ("home_descent_reached","control_applied","priority_order_observed","critical_diversion_observed"));return result
 
 
 if __name__=="__main__":

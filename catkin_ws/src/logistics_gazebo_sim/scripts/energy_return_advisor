@@ -5,6 +5,9 @@ import rospy,rospkg,yaml
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 from logistics_gazebo_sim.energy_return_policy import EnergyReturnPolicy
+from logistics_gazebo_sim.energy_return_policy import choose_alternate_landing_site
+from logistics_gazebo_sim.clearance_analyzer import obstacle_primitives
+from logistics_gazebo_sim.scenes import SCENES
 
 
 def _safe_slots(values,minimum):
@@ -22,6 +25,9 @@ class EnergyReturnAdvisor:
         with open(rospy.get_param("~mission_config",default),encoding="utf-8") as stream:self.config=yaml.safe_load(stream)
         self.count=int(rospy.get_param("~vehicle_count",self.config["vehicle_count"]))
         spacing=float(rospy.get_param("~spawn_spacing_m",3.3));middle=(self.count-1)*.5
+        self.scene_id=int(rospy.get_param("~scene_id",0));self.origin=(float(rospy.get_param("~spawn_x",-40.)),float(rospy.get_param("~spawn_y",-40.)))
+        if self.scene_id not in SCENES:raise ValueError("invalid scene_id")
+        self.primitives=obstacle_primitives(SCENES[self.scene_id]);self.alternate=None
         self.spawn=[((i-middle)*spacing,0.,0.) for i in range(self.count)]
         formation=self.config.get("formation",{});self.minimum_separation=float(formation.get("minimum_separation_m",3.0))+float(formation.get("tracking_reserve_m",.3))
         self.home=_safe_slots([tuple(list(value)+[0.] if len(value)==2 else value) for value in self.config["initial_formation"]],self.minimum_separation)
@@ -45,7 +51,20 @@ class EnergyReturnAdvisor:
         positions=self.poses if all(value is not None for value in self.poses) else None
         result=self.policy.update(self.energy,rospy.get_time(),positions,self.home,str(self.state.get("phase","")),self.minimum_separation)
         result["safety_override_required"]=bool((self.state.get("safety_interlock") or {}).get("hold")) or str(self.state.get("dynamic_action",""))=="HOLD"
-        result["mission_phase"]=str(self.state.get("phase",""));return result
+        phase=str(self.state.get("phase",""));critical=[value for value in result["vehicles"] if value["level"]=="CRITICAL"]
+        if len(critical)==1 and positions and phase in ("CRUISE_REFORMATION","RETURN"):
+            vehicle=int(critical[0]["vehicle_id"].replace("uav",""));world=[(p[0]+self.origin[0],p[1]+self.origin[1],p[2]) for p in positions]
+            if self.alternate is None or self.alternate["vehicle_id"]!=critical[0]["vehicle_id"]:
+                site=choose_alternate_landing_site(world[vehicle],[p for i,p in enumerate(world) if i!=vehicle],self.primitives,min_separation=self.minimum_separation)
+                self.alternate=None if site is None else {"vehicle_id":critical[0]["vehicle_id"],"world_point":list(site),
+                    "local_point":[site[0]-self.origin[0]-self.spawn[vehicle][0],site[1]-self.origin[1]-self.spawn[vehicle][1],site[2]]}
+            result["alternate_landing"]=self.alternate
+            if self.alternate is None:result["action"]="HOLD_RECOMMENDED"
+        else:
+            if not critical:self.alternate=None
+            result["alternate_landing"]=None
+            if len(critical)>1:result["action"]="HOLD_RECOMMENDED"
+        result["mission_phase"]=phase;return result
     def run(self):
         rate=rospy.Rate(2)
         while not rospy.is_shutdown():self.publisher.publish(json.dumps(self.report(),separators=(",",":")));rate.sleep()

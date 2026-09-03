@@ -104,7 +104,7 @@ class MissionPlayer:
         self.safety_hold_targets=None;self.safety_status={"hold":False,"minimum_separation_m":None,"reason":None}
         self.energy_return_mode=str(rospy.get_param("~energy_return_control_mode","shadow")).lower()
         if self.energy_return_mode not in ("shadow","limited"):raise ValueError("energy_return_control_mode must be shadow or limited")
-        self.landing_stagger_s=float(rospy.get_param("~energy_landing_stagger_s",2.0));self.energy_advisory={};self.energy_advisory_stamp=None
+        self.landing_stagger_s=float(rospy.get_param("~energy_landing_stagger_s",2.0));self.energy_advisory={};self.energy_advisory_stamp=None;self.energy_diversion=None
         rospy.Subscriber("/fleet/dynamic_risk",String,self._dynamic_risk_cb,queue_size=1)
         rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self._fleet_diagnostics_cb,queue_size=1)
         rospy.Subscriber("/fleet/energy_return_advisory",String,self._energy_return_cb,queue_size=1)
@@ -175,6 +175,10 @@ class MissionPlayer:
             expected={"uav{}".format(i) for i in range(self.count)}
             if set(order)==expected and len(order)==self.count:
                 self.energy_advisory=value;self.energy_advisory_stamp=rospy.get_time()
+                alternate=value.get("alternate_landing")
+                if self.energy_return_mode=="limited" and value.get("fleet_level")=="CRITICAL" and isinstance(alternate,dict):
+                    vehicle=str(alternate.get("vehicle_id",""));point=list(alternate.get("local_point") or [])
+                    if vehicle in expected and len(point)==3:self.energy_diversion={"vehicle_id":vehicle,"local_point":[float(axis) for axis in point]}
         except (TypeError,ValueError):pass
     def all_ready(self):return all(self.ready) and min(self.altitudes)>=float(self.cfg["ready_altitude"])
     def _start(self,_):self.enabled,self.paused=True,False;self.takeoff_pub.publish(True);return TriggerResponse(True,"takeoff authorized; synchronized mission start requested")
@@ -188,7 +192,7 @@ class MissionPlayer:
         self.emergency_land=True;self.enabled,self.paused=False,False;self.takeoff_pub.publish(False);self.complete_pub.publish(True);return TriggerResponse(True,"emergency landing requested")
     def _reset(self,_):
         self.enabled=False;self.paused=False;self.start_time=None;self.pause_time=None;self.emergency_land=False;self.elapsed=0.0;self.last_stage=None;self.landing_ready_since=None
-        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.dynamic_obstacle_count=0;self.safety_interlock.engaged=False;self.safety_interlock.safe_since=None;self.safety_interlock.reason=None;self.safety_hold_targets=None;self.energy_advisory={};self.energy_advisory_stamp=None;self.last_clock=rospy.Time.now()
+        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.dynamic_obstacle_count=0;self.safety_interlock.engaged=False;self.safety_interlock.safe_since=None;self.safety_interlock.reason=None;self.safety_hold_targets=None;self.energy_advisory={};self.energy_advisory_stamp=None;self.energy_diversion=None;self.last_clock=rospy.Time.now()
         self.complete_pub.publish(False);self.takeoff_pub.publish(False)
         return TriggerResponse(True,"mission reset; takeoff authorization revoked")
 
@@ -267,6 +271,17 @@ class MissionPlayer:
                 {"stamp":now.to_sec(),"horizon_s":self.prediction_horizon,
                  "paths":self.prediction_paths()},separators=(",",":")))
 
+            diversion_active=False;diversion_state="NONE"
+            if self.energy_diversion is not None and phase in ("CRUISE_REFORMATION","RETURN","HOME_FORMATION","HOME_DESCENT"):
+                vehicle=int(self.energy_diversion["vehicle_id"].replace("uav",""));point=self.energy_diversion["local_point"]
+                fresh=self.energy_advisory_stamp is not None and now.to_sec()-self.energy_advisory_stamp<=1.5
+                if self.current_poses[vehicle] is not None:
+                    current=self.current_poses[vehicle]
+                    if fresh:
+                        horizontal=math.hypot(current[0]-point[0],current[1]-point[1]);z=current[2] if horizontal>.8 else point[2]
+                        targets[vehicle]=(point[0],point[1],z);diversion_active=True;diversion_state="APPROACH" if horizontal>.8 else "DESCENT"
+                    else:targets[vehicle]=current;diversion_state="STALE_HOLD"
+
             if self.dynamic_avoidance_enabled and self.local_avoidance_algorithm!="orca3d":
                 self.avoidance_command=self.avoidance_execution.command(now.to_sec())
                 if self.avoidance_command["action"]=="AVOID":
@@ -304,7 +319,8 @@ class MissionPlayer:
             elif self.start_time:state="RUNNING"
             else:state="READY" if self.all_ready() else "INITIALIZING"
             progress=min(1.0,self.elapsed/self.descent_end)
-            energy_execution={"mode":self.energy_return_mode,"landing_order":self.energy_advisory.get("landing_order",[]),"stagger_s":self.landing_stagger_s,"control_applied":self.energy_return_mode=="limited" and phase=="HOME_DESCENT" and self.energy_advisory_stamp is not None and now.to_sec()-self.energy_advisory_stamp<=1.5 and not self.safety_status["hold"] and self.dynamic_action!="HOLD"}
+            landing_control=self.energy_return_mode=="limited" and phase=="HOME_DESCENT" and self.energy_advisory_stamp is not None and now.to_sec()-self.energy_advisory_stamp<=1.5
+            energy_execution={"mode":self.energy_return_mode,"landing_order":self.energy_advisory.get("landing_order",[]),"stagger_s":self.landing_stagger_s,"diversion":self.energy_diversion,"diversion_state":diversion_state,"control_applied":(landing_control or diversion_active) and not self.safety_status["hold"] and self.dynamic_action!="HOLD"}
             self.state_pub.publish(json.dumps({"state":state,"stage":stage,"phase":phase,"elapsed":round(self.elapsed,2),"progress":round(progress,3),"ready":self.ready,"dynamic_action":self.dynamic_action,"dynamic_risk":self.dynamic_level,"speed_scale":round(self.dynamic_scale,2),"avoidance_execution":self.avoidance_command,"safety_interlock":self.safety_status,"energy_return_execution":energy_execution}))
             if stage!=self.last_stage:rospy.loginfo("Mission stage %d (%s) at %.1f s",stage,phase,self.elapsed);self.last_stage=stage
             for pub,(x,y,z) in zip(self.pubs,targets):

@@ -418,6 +418,7 @@ class OperatorPlugin(Plugin):
             text=names.get(level,level)
             if margins:text+=" | 最低最终余量 {:.1f} Wh".format(min(margins))
             if value.get("slot_assignments"):text+=" | 槽位 {}".format(value["slot_assignments"])
+            if value.get("alternate_landing"):text+=" | 备用点 {}".format(value["alternate_landing"].get("world_point"))
             if value.get("safety_override_required"):text+=" | 安全联锁优先"
             text+=" | 影子模式";self.energy_return.setText(text)
             self.energy_return.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","LOW":"#ef6c00","NORMAL":"#2e7d32"}.get(level,"#607d8b")))

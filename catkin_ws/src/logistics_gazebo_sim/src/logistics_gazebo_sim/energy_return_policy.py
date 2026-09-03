@@ -85,3 +85,31 @@ def staggered_descent_progress(elapsed,start,end,rank,delay_s):
     """Monotonic per-aircraft descent progress with an energy-priority delay."""
     duration=max(1e-6,float(end)-float(start));raw=(float(elapsed)-float(start)-int(rank)*float(delay_s))/duration
     raw=max(0.0,min(1.0,raw));return raw*raw*(3.0-2.0*raw)
+
+
+def choose_alternate_landing_site(position,other_positions,primitives,world_limit=46.0,
+                                  footprint_clearance=2.0,min_separation=3.3):
+    """Choose the closest clear site with a collision-free level approach."""
+    start=tuple(float(value) for value in position);directions=[(0.,0.)]
+    for radius in (4.,8.,12.):
+        directions.extend((radius*math.cos(index*math.pi/4),radius*math.sin(index*math.pi/4)) for index in range(8))
+    for dx,dy in directions:
+        candidate=(start[0]+dx,start[1]+dy,0.18)
+        if max(abs(candidate[0]),abs(candidate[1]))>world_limit:continue
+        if any(math.hypot(candidate[0]-other[0],candidate[1]-other[1])<min_separation for other in other_positions):continue
+        if any(_footprint_distance(candidate,primitive)<footprint_clearance for primitive in primitives):continue
+        if _level_approach_clear(start,candidate,primitives,footprint_clearance):return tuple(round(value,3) for value in candidate)
+    return None
+
+
+def _footprint_distance(point,primitive):
+    if primitive["kind"]=="cylinder":return max(0.,math.hypot(point[0]-primitive["x"],point[1]-primitive["y"])-primitive["radius"])
+    dx=max(abs(point[0]-primitive["x"])-primitive["half_x"],0.);dy=max(abs(point[1]-primitive["y"])-primitive["half_y"],0.)
+    return math.hypot(dx,dy)
+
+
+def _level_approach_clear(start,landing,primitives,clearance):
+    for step in range(21):
+        ratio=step/20.;point=(start[0]+(landing[0]-start[0])*ratio,start[1]+(landing[1]-start[1])*ratio,start[2])
+        if any(point[2]<=primitive["height"]+.8 and _footprint_distance(point,primitive)<clearance for primitive in primitives):return False
+    return True
