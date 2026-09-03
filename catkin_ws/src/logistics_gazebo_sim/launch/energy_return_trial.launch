@@ -1,0 +1,10 @@
+<launch>
+  <arg name="report_path" default="/tmp/v0510_energy_return_report.json"/>
+  <node pkg="logistics_gazebo_sim" type="energy_return_advisor" name="energy_return_advisor" output="screen">
+    <param name="vehicle_count" value="3"/><param name="spawn_spacing_m" value="3.3"/>
+    <param name="energy_stale_after_s" value="1.0"/>
+  </node>
+  <node pkg="logistics_gazebo_sim" type="energy_return_trial" name="energy_return_trial" output="screen" required="true">
+    <param name="report_path" value="$(arg report_path)"/>
+  </node>
+</launch>

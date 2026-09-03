@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Exercise stale, low, critical and safety-precedence return advice."""
+import json,os,time
+import rospy
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+
+
+class Trial:
+    def __init__(self):
+        self.value={};self.energy=rospy.Publisher("/fleet/energy_state",String,queue_size=2)
+        self.state=rospy.Publisher("/fleet/mission_state",String,queue_size=2)
+        self.poses=[rospy.Publisher("/uav{}/mavros/local_position/pose".format(i),PoseStamped,queue_size=2) for i in range(3)]
+        rospy.Subscriber("/fleet/energy_return_advisory",String,self.cb,queue_size=5)
+    def cb(self,msg):
+        try:self.value=json.loads(msg.data)
+        except ValueError:pass
+    def publish(self,margins,phase="RETURN",hold=False,duration=.8):
+        deadline=time.time()+duration
+        while time.time()<deadline and not rospy.is_shutdown():
+            now=rospy.get_time();vehicles=[{"vehicle_id":"uav{}".format(i),"usable_margin_wh":margin+5.,"required_to_land_wh":5.} for i,margin in enumerate(margins)]
+            self.energy.publish(json.dumps({"stamp":now,"vehicles":vehicles}))
+            self.state.publish(json.dumps({"phase":phase,"dynamic_action":"NORMAL","safety_interlock":{"hold":hold}}))
+            for i,pub in enumerate(self.poses):msg=PoseStamped();msg.pose.position.x=20.+i*2.;msg.pose.position.z=8.;pub.publish(msg)
+            rospy.sleep(.05)
+        rospy.sleep(.6);return dict(self.value)
+    def run(self):
+        rospy.sleep(1.8);stale=dict(self.value)
+        low=self.publish([4.,30.,40.]);critical=self.publish([-2.,30.,40.]);safe_hold=self.publish([20.,30.,40.],hold=True)
+        report={"stale_fails_safe":stale.get("fleet_level")=="STALE" and stale.get("action")=="HOLD_RECOMMENDED",
+            "low_return":low.get("fleet_level")=="LOW" and low.get("action")=="RETURN_RECOMMENDED",
+            "slots_present":len(low.get("slot_assignments") or {})==3,
+            "critical_alternate":critical.get("action")=="ALTERNATE_LANDING_RECOMMENDED" and (critical.get("landing_order") or [None])[0]=="uav0",
+            "safety_precedence":safe_hold.get("safety_override_required") is True,
+            "shadow_only":all(value.get("control_applied") is False for value in (stale,low,critical,safe_hold))}
+        report["pass"]=all(report.values());return report
+
+
+if __name__=="__main__":
+    rospy.init_node("energy_return_trial");path=rospy.get_param("~report_path","")
+    report=Trial().run();rendered=json.dumps(report,sort_keys=True,indent=2)
+    if path:
+        directory=os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(directory):os.makedirs(directory)
+        with open(path,"w") as stream:stream.write(rendered+"\n")
+    rospy.loginfo("energy return report: %s",json.dumps(report,sort_keys=True))
+    if not report["pass"]:raise SystemExit(1)

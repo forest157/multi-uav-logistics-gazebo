@@ -15,6 +15,7 @@ class Recorder:
         self.handle=open(self.path,"w",newline="",encoding="utf-8");self.writer=csv.writer(self.handle)
         header=["ros_time","state","stage","phase","progress",
             "energy_min_remaining_fraction","energy_min_usable_margin_wh","energy_max_required_to_land_wh","energy_all_reserve_safe",
+            "energy_return_level","energy_return_action","energy_return_safety_override","energy_return_slots","energy_landing_order",
             "dynamic_action","dynamic_risk","speed_scale","avoidance_state",
             "avoidance_offset_x","avoidance_offset_y","avoidance_offset_z",
             "avoidance_failure","avoidance_algorithm","orca_max_command_speed_mps","planner_viable","planner_reason","planner_time_ms","planner_rejections","mpc_viable","mpc_total_solve_ms","mpc_max_solve_ms","mpc_solver_retries","mpc_warm_started_vehicles","mpc_rejections","mpc_consensus_strength","predicted_separation_m","dynamic_clearance_m",
@@ -23,11 +24,12 @@ class Recorder:
             "track_count","observed_track_count","mean_track_confidence","max_occlusion_s","track_ids"]
         for i in range(self.count):header += ["uav{}_x".format(i),"uav{}_y".format(i),"uav{}_z".format(i)]
         self.writer.writerow(header)
-        self.tracks={};self.energy={}
+        self.tracks={};self.energy={};self.energy_return={}
         self.state={"state":"INITIALIZING","stage":0,"progress":0.0};self.dynamic={};self.safety=["","","","",""];self.poses=[None]*self.count
         rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self.diag_cb,queue_size=1);rospy.Subscriber("/fleet/dynamic_risk",String,self.dynamic_cb,queue_size=1)
         rospy.Subscriber("/perception/dynamic_tracks",String,self.tracks_cb,queue_size=1)
         rospy.Subscriber("/fleet/energy_state",String,self.energy_cb,queue_size=1)
+        rospy.Subscriber("/fleet/energy_return_advisory",String,self.energy_return_cb,queue_size=1)
         for i in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
         rospy.Timer(rospy.Duration(0.2),self.sample);rospy.on_shutdown(self.close);rospy.loginfo("Mission CSV: %s",self.path)
     def state_cb(self,msg):
@@ -44,6 +46,9 @@ class Recorder:
         except ValueError:pass
     def energy_cb(self,msg):
         try:self.energy=json.loads(msg.data)
+        except ValueError:pass
+    def energy_return_cb(self,msg):
+        try:self.energy_return=json.loads(msg.data)
         except ValueError:pass
 
     def pose_cb(self,msg,i):self.poses[i]=msg.pose.position
@@ -72,7 +77,10 @@ class Recorder:
              min([value.get("remaining_fraction",1.0) for value in energy] or [""]),
              min([value.get("usable_margin_wh",0.0) for value in energy] or [""]),
              max([value.get("required_to_land_wh",0.0) for value in energy] or [""]),
-             self.energy.get("all_reserve_safe",""),self.state.get("dynamic_action",""),
+             self.energy.get("all_reserve_safe",""),self.energy_return.get("fleet_level",""),
+             self.energy_return.get("action",""),self.energy_return.get("safety_override_required",""),
+             json.dumps(self.energy_return.get("slot_assignments") or {},sort_keys=True),
+             json.dumps(self.energy_return.get("landing_order") or []),self.state.get("dynamic_action",""),
              self.state.get("dynamic_risk",""),self.state.get("speed_scale",""),
              execution.get("state",""),offset[0],offset[1],offset[2],
              execution.get("failure",""),execution.get("algorithm","") or avoidance.get("algorithm",""),max_orca_speed,planner_viable,planner_reason,planner_time,planner_rejections,mpc_viable,mpc_timing.get("total",""),mpc_timing.get("maximum",""),mpc_retries,mpc_warm,mpc_rejections,mpc_consensus,separation.get("minimum_separation_m",""),

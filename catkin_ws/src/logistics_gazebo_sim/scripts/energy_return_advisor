@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Publish energy-aware return advice without commanding the aircraft."""
+import json,os
+import rospy,rospkg,yaml
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+from logistics_gazebo_sim.energy_return_policy import EnergyReturnPolicy
+
+
+class EnergyReturnAdvisor:
+    def __init__(self):
+        default=os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim"),"config","mission_scene0.yaml")
+        with open(rospy.get_param("~mission_config",default),encoding="utf-8") as stream:self.config=yaml.safe_load(stream)
+        self.count=int(rospy.get_param("~vehicle_count",self.config["vehicle_count"]))
+        spacing=float(rospy.get_param("~spawn_spacing_m",3.3));middle=(self.count-1)*.5
+        self.spawn=[((i-middle)*spacing,0.,0.) for i in range(self.count)]
+        self.home=[tuple(list(value)+[0.] if len(value)==2 else value) for value in self.config["initial_formation"]]
+        if len(self.home)!=self.count:raise ValueError("home formation must match vehicle_count")
+        self.policy=EnergyReturnPolicy(rospy.get_param("~low_margin_wh",12.),rospy.get_param("~critical_margin_wh",0.),
+            rospy.get_param("~release_hysteresis_wh",3.),rospy.get_param("~energy_stale_after_s",1.5))
+        self.energy={};self.state={};self.poses=[None]*self.count
+        rospy.Subscriber("/fleet/energy_state",String,self.energy_cb,queue_size=1)
+        rospy.Subscriber("/fleet/mission_state",String,self.state_cb,queue_size=1)
+        for i in range(self.count):rospy.Subscriber("/uav{}/mavros/local_position/pose".format(i),PoseStamped,self.pose_cb,callback_args=i,queue_size=1)
+        self.publisher=rospy.Publisher("/fleet/energy_return_advisory",String,queue_size=2,latch=True)
+    def energy_cb(self,msg):
+        try:self.energy=json.loads(msg.data)
+        except (TypeError,ValueError):self.energy={}
+    def state_cb(self,msg):
+        try:self.state=json.loads(msg.data)
+        except (TypeError,ValueError):self.state={}
+    def pose_cb(self,msg,index):
+        p=msg.pose.position;self.poses[index]=(p.x+self.spawn[index][0],p.y+self.spawn[index][1],p.z)
+    def report(self):
+        positions=self.poses if all(value is not None for value in self.poses) else None
+        result=self.policy.update(self.energy,rospy.get_time(),positions,self.home,str(self.state.get("phase","")))
+        result["safety_override_required"]=bool((self.state.get("safety_interlock") or {}).get("hold")) or str(self.state.get("dynamic_action",""))=="HOLD"
+        result["mission_phase"]=str(self.state.get("phase",""));return result
+    def run(self):
+        rate=rospy.Rate(2)
+        while not rospy.is_shutdown():self.publisher.publish(json.dumps(self.report(),separators=(",",":")));rate.sleep()
+
+
+if __name__=="__main__":rospy.init_node("energy_return_advisor");EnergyReturnAdvisor().run()

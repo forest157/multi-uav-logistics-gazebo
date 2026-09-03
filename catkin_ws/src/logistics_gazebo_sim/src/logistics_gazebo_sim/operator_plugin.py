@@ -25,7 +25,7 @@ SCENE_DEFAULTS = {
 class PointBridge(QObject):
     point_received=Signal(float,float)
 class RosUiBridge(QObject):
-    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object);perception_received=Signal(object)
+    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object);perception_received=Signal(object);energy_return_received=Signal(object)
 
 class OperatorPlugin(Plugin):
     def __init__(self, context):
@@ -71,10 +71,10 @@ class OperatorPlugin(Plugin):
         self.start.setObjectName("primary");self.land.setObjectName("danger");self.pause.setObjectName("secondary");self.resume.setObjectName("secondary");self.reset.setObjectName("secondary")
         for button in (self.start,self.pause,self.resume,self.reset,self.land):row.addWidget(button)
         root.addWidget(mission)
-        status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e");self.dynamic_risk=QLabel("等待动态障碍数据");self.perception_status=QLabel("等待感知数据")
+        status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e");self.dynamic_risk=QLabel("等待动态障碍数据");self.perception_status=QLabel("等待感知数据");self.energy_return=QLabel("等待能量返航数据")
         self.state.setObjectName("statusBadge");self.stage.setObjectName("statusBadge")
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
-        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);sf.addRow("感知状态",self.perception_status);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
+        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);sf.addRow("感知状态",self.perception_status);sf.addRow("能量返航",self.energy_return);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
         self.process.setProcessChannelMode(QProcess.MergedChannels);self.process.readyReadStandardOutput.connect(self.drain_simulation_output)
         self.simulation_stop_requested=False;self.simulation_start_pending=False
@@ -94,10 +94,11 @@ class OperatorPlugin(Plugin):
         rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
         self.formation.currentIndexChanged.connect(self.parameters_changed);self.avoidance_mode.currentIndexChanged.connect(self.parameters_changed);self.perception_source.currentIndexChanged.connect(self.parameters_changed)
-        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb)
+        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb);self.ros_ui_bridge.energy_return_received.connect(self.energy_return_cb)
         rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1)
         rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1)
         rospy.Subscriber("/perception/status",String,lambda msg:self.ros_ui_bridge.perception_received.emit(msg),queue_size=1)
+        rospy.Subscriber("/fleet/energy_return_advisory",String,lambda msg:self.ros_ui_bridge.energy_return_received.emit(msg),queue_size=1)
         self.update_defaults()
     def update_defaults(self):
         self.clear_runtime_markers()
@@ -409,6 +410,18 @@ class OperatorPlugin(Plugin):
             else:text="感知源 {} | {}".format(value.get("source","-"),state)
             self.perception_status.setText(text)
         except (TypeError,ValueError,KeyError):self.perception_status.setText("感知状态数据格式错误")
+    def energy_return_cb(self,msg):
+        try:
+            value=json.loads(msg.data);level=value.get("fleet_level","STALE")
+            names={"NORMAL":"正常","LOW":"低余量，建议返航","CRITICAL":"临界，建议备用点降落","STALE":"数据过期，建议保持"}
+            margins=[item.get("final_margin_wh") for item in value.get("vehicles",[]) if item.get("final_margin_wh") is not None]
+            text=names.get(level,level)
+            if margins:text+=" | 最低最终余量 {:.1f} Wh".format(min(margins))
+            if value.get("slot_assignments"):text+=" | 槽位 {}".format(value["slot_assignments"])
+            if value.get("safety_override_required"):text+=" | 安全联锁优先"
+            text+=" | 影子模式";self.energy_return.setText(text)
+            self.energy_return.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","LOW":"#ef6c00","NORMAL":"#2e7d32"}.get(level,"#607d8b")))
+        except (TypeError,ValueError):self.energy_return.setText("能量返航数据格式错误")
     def shutdown_plugin(self):
         self.analysis_timer.stop();self.analysis_timeout.stop()
         if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)
