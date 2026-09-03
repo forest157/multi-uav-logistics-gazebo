@@ -1,5 +1,5 @@
 import unittest
-from logistics_gazebo_sim.energy_return_policy import EnergyReturnPolicy,assign_return_slots
+from logistics_gazebo_sim.energy_return_policy import EnergyReturnPolicy,assign_return_slots,staggered_descent_progress
 
 
 def report(stamp,margins,required=5.0):
@@ -40,6 +40,10 @@ class EnergyReturnPolicyTest(unittest.TestCase):
         assessments=EnergyReturnPolicy().update(report(1,[1,20]),1)["vehicles"]
         slots=assign_return_slots(assessments,[(-2,0,0),(2,0,0)],[(2,0,0),(-2,0,0)],min_separation=1.0)
         self.assertEqual(slots,{"uav0":1,"uav1":0})
+    def test_staggered_descent_is_monotonic_and_energy_ordered(self):
+        first=staggered_descent_progress(15,10,20,0,2);second=staggered_descent_progress(15,10,20,1,2)
+        self.assertGreater(first,second);self.assertEqual(staggered_descent_progress(10,10,20,2,2),0.0)
+        self.assertEqual(staggered_descent_progress(24,10,20,2,2),1.0)
 
 
 if __name__=="__main__":unittest.main()

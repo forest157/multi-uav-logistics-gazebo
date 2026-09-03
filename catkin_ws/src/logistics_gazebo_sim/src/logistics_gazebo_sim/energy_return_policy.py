@@ -79,3 +79,9 @@ def _route_cost(position,slot):
     if len(position)!=3 or len(slot)!=3:raise ValueError("positions and slots must be xyz")
     dx=float(position[0])-float(slot[0]);dy=float(position[1])-float(slot[1]);dz=float(position[2])-float(slot[2])
     return math.hypot(dx,dy)+1.5*max(0.0,dz)+2.0*max(0.0,-dz)
+
+
+def staggered_descent_progress(elapsed,start,end,rank,delay_s):
+    """Monotonic per-aircraft descent progress with an energy-priority delay."""
+    duration=max(1e-6,float(end)-float(start));raw=(float(elapsed)-float(start)-int(rank)*float(delay_s))/duration
+    raw=max(0.0,min(1.0,raw));return raw*raw*(3.0-2.0*raw)
