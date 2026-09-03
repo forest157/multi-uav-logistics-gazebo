@@ -2,12 +2,14 @@
 """YAML-configured round-trip fleet mission with synchronized lifecycle services."""
 import json, os, math
 import rospy, rospkg, yaml
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger, TriggerResponse
 from logistics_gazebo_sim.dynamic_obstacles import DynamicSafetyResponse, AvoidanceExecution, DynamicObstacleError
 from logistics_gazebo_sim.local_avoidance import OrcaCommandGate, orca_position_targets
+from logistics_gazebo_sim.safety_interlock import FleetSeparationInterlock,diagnostic_error_present,guarded_collective_targets
 
 def smoothstep(v):
     v=max(0.0,min(1.0,v));return v*v*(3.0-2.0*v)
@@ -92,7 +94,15 @@ class MissionPlayer:
         self.dynamic_response=DynamicSafetyResponse(rospy.get_param("~dynamic_warning_scale",0.35),rospy.get_param("~dynamic_release_delay_s",2.0))
         self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE"
         self.dynamic_hold_targets=None
+        self.dynamic_obstacle_count=0
+        self.fleet_diagnostic_error=False
+        self.safety_interlock=FleetSeparationInterlock(
+            rospy.get_param("~safety_hold_separation_m",2.7),
+            rospy.get_param("~safety_release_separation_m",3.0),
+            rospy.get_param("~safety_release_delay_s",1.0))
+        self.safety_hold_targets=None;self.safety_status={"hold":False,"minimum_separation_m":None,"reason":None}
         rospy.Subscriber("/fleet/dynamic_risk",String,self._dynamic_risk_cb,queue_size=1)
+        rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,self._fleet_diagnostics_cb,queue_size=1)
         self.enabled=rospy.get_param("~auto_start",True);self.paused=False;self.start_time=None;self.pause_time=None;self.last_stage=None;self.emergency_land=False
         self.elapsed=0.0;self.landing_ready_since=None;self.last_clock=rospy.Time.now()
         arrival=float(self.cfg["stages"]["arrival_reconfigure_end"])
@@ -108,6 +118,7 @@ class MissionPlayer:
         if not self.dynamic_safety_enabled:return
         try:payload=json.loads(msg.data);level=str(payload.get("level","STALE"))
         except (TypeError,ValueError):payload={};level="STALE"
+        self.dynamic_obstacle_count=int(payload.get("obstacle_count",0) or 0)
         command=self.dynamic_response.update(level,rospy.get_time())
         self.dynamic_action,self.dynamic_scale,self.dynamic_level=command["action"],command["speed_scale"],command["risk_level"]
         if self.dynamic_avoidance_enabled and self.local_avoidance_algorithm=="orca3d":
@@ -146,6 +157,10 @@ class MissionPlayer:
             self.dynamic_hold_targets=list(self.current_poses);rospy.logwarn("Dynamic obstacle critical: synchronized fleet hold")
         elif self.dynamic_action!="HOLD":
             self.dynamic_hold_targets=None
+    def _fleet_diagnostics_cb(self,msg):
+        relevant=[status for status in msg.status if status.name=="logistics_fleet/safety"]
+        self.fleet_diagnostic_error=diagnostic_error_present(
+            [status.level for status in relevant],DiagnosticStatus.ERROR)
     def all_ready(self):return all(self.ready) and min(self.altitudes)>=float(self.cfg["ready_altitude"])
     def _start(self,_):self.enabled,self.paused=True,False;self.takeoff_pub.publish(True);return TriggerResponse(True,"takeoff authorized; synchronized mission start requested")
     def _pause(self,_):
@@ -158,7 +173,7 @@ class MissionPlayer:
         self.emergency_land=True;self.enabled,self.paused=False,False;self.takeoff_pub.publish(False);self.complete_pub.publish(True);return TriggerResponse(True,"emergency landing requested")
     def _reset(self,_):
         self.enabled=False;self.paused=False;self.start_time=None;self.pause_time=None;self.emergency_land=False;self.elapsed=0.0;self.last_stage=None;self.landing_ready_since=None
-        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.last_clock=rospy.Time.now()
+        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.dynamic_obstacle_count=0;self.safety_interlock.engaged=False;self.safety_interlock.safe_since=None;self.safety_interlock.reason=None;self.safety_hold_targets=None;self.last_clock=rospy.Time.now()
         self.complete_pub.publish(False);self.takeoff_pub.publish(False)
         return TriggerResponse(True,"mission reset; takeoff authorization revoked")
 
@@ -221,7 +236,8 @@ class MissionPlayer:
         while not rospy.is_shutdown():
             now=rospy.Time.now();dt=max(0.0,(now-self.last_clock).to_sec());self.last_clock=now
             if self.enabled and self.start_time is None and self.all_ready():self.start_time=now;rospy.loginfo("Synchronized round-trip mission started")
-            if self.start_time is not None and not self.paused:self.elapsed+=dt*self.dynamic_scale
+            if self.start_time is not None and not self.paused and not self.safety_interlock.engaged:
+                self.elapsed+=dt*self.dynamic_scale
             stage,phase,targets=self.targets(self.elapsed)
             for pub,(x,y,z) in zip(self.nominal_pubs,targets):
                 msg=PoseStamped();msg.header.stamp,msg.header.frame_id=rospy.Time.now(),"map";msg.pose.position.x,msg.pose.position.y,msg.pose.position.z=x,y,z;msg.pose.orientation.w=1.0;pub.publish(msg)
@@ -232,7 +248,7 @@ class MissionPlayer:
             if self.dynamic_avoidance_enabled and self.local_avoidance_algorithm!="orca3d":
                 self.avoidance_command=self.avoidance_execution.command(now.to_sec())
                 if self.avoidance_command["action"]=="AVOID":
-                    ox,oy,oz=self.avoidance_command["offset"];targets=[(x+ox,y+oy,z+oz) for x,y,z in targets]
+                    targets=guarded_collective_targets(targets,self.avoidance_command,self.dynamic_obstacle_count)
             if self.dynamic_action=="ORCA" and self.orca_velocities is not None:
                 if self.orca_plan_stamp is None or now.to_sec()-self.orca_plan_stamp>self.orca_gate.timeout:
                     self.dynamic_action,self.dynamic_scale="HOLD",0.0;self.orca_failure="ORCA command expired during execution"
@@ -241,6 +257,14 @@ class MissionPlayer:
                 elif all(p is not None for p in self.current_poses):
                     targets=orca_position_targets(self.current_poses,self.orca_velocities,self.orca_position_horizon)
             if self.dynamic_action=="HOLD" and self.dynamic_hold_targets is not None:targets=self.dynamic_hold_targets
+            if all(p is not None for p in self.current_poses):
+                world=[(pose[0]+self.spawn_offsets[index][0],pose[1]+self.spawn_offsets[index][1],pose[2]) for index,pose in enumerate(self.current_poses)]
+                was_holding=self.safety_interlock.engaged
+                self.safety_status=self.safety_interlock.update(world,now.to_sec(),self.fleet_diagnostic_error)
+                if self.safety_status["hold"] and (not was_holding or self.safety_hold_targets is None):
+                    self.safety_hold_targets=list(self.current_poses);rospy.logerr("Fleet safety interlock engaged: %s",self.safety_status["reason"])
+                elif not self.safety_status["hold"]:self.safety_hold_targets=None
+            if self.safety_status["hold"] and self.safety_hold_targets is not None:targets=self.safety_hold_targets
             near_ground=self.start_time is not None and self.elapsed>=self.descent_end and max(self.altitudes)<=0.30
             if near_ground:
                 if self.landing_ready_since is None:self.landing_ready_since=rospy.Time.now()
@@ -250,6 +274,7 @@ class MissionPlayer:
             if self.emergency_land:state="EMERGENCY_LAND"
             elif complete:state="COMPLETE"
             elif self.paused:state="PAUSED"
+            elif self.safety_status["hold"] and self.start_time:state="SAFETY_HOLD"
             elif self.dynamic_action=="HOLD" and self.start_time:state="DYNAMIC_HOLD"
             elif self.dynamic_action=="AVOID" and self.start_time:state="DYNAMIC_AVOID"
             elif self.dynamic_action=="ORCA" and self.start_time:state="DYNAMIC_ORCA"
@@ -257,7 +282,7 @@ class MissionPlayer:
             elif self.start_time:state="RUNNING"
             else:state="READY" if self.all_ready() else "INITIALIZING"
             progress=min(1.0,self.elapsed/self.descent_end)
-            self.state_pub.publish(json.dumps({"state":state,"stage":stage,"phase":phase,"elapsed":round(self.elapsed,2),"progress":round(progress,3),"ready":self.ready,"dynamic_action":self.dynamic_action,"dynamic_risk":self.dynamic_level,"speed_scale":round(self.dynamic_scale,2),"avoidance_execution":self.avoidance_command}))
+            self.state_pub.publish(json.dumps({"state":state,"stage":stage,"phase":phase,"elapsed":round(self.elapsed,2),"progress":round(progress,3),"ready":self.ready,"dynamic_action":self.dynamic_action,"dynamic_risk":self.dynamic_level,"speed_scale":round(self.dynamic_scale,2),"avoidance_execution":self.avoidance_command,"safety_interlock":self.safety_status}))
             if stage!=self.last_stage:rospy.loginfo("Mission stage %d (%s) at %.1f s",stage,phase,self.elapsed);self.last_stage=stage
             for pub,(x,y,z) in zip(self.pubs,targets):
                 msg=PoseStamped();msg.header.stamp,msg.header.frame_id=rospy.Time.now(),"map";msg.pose.position.x,msg.pose.position.y,msg.pose.position.z=x,y,z;msg.pose.orientation.w=1.0;pub.publish(msg)
