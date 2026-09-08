@@ -19,7 +19,7 @@ assets:
 - id: procedural_roof_detail
   source: project-authored
   license: MIT
-  dimensions: building footprint plus 0.35 m, height 0.36 m
+  dimensions: building footprint, top aligned with collision top, thickness at most 0.36 m
   collision: false
   rationale: Lightweight visual detail above an already conservative building collision.
 - id: start_goal_decals

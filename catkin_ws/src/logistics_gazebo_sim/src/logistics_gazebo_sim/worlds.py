@@ -34,7 +34,8 @@ def _box(name, x, y, w, d, height):
     cx, cy = metric_xy((x + w / 2.0, y + d / 2.0))
     width,depth=w*SCALE,d*SCALE
     body=_model(name,cx,cy,height/2.0,"<box><size>{:.3f} {:.3f} {:.3f}</size></box>".format(width,depth,height),"0.43 0.47 0.52 1")
-    roof=_visual_model(name+"_roof",cx,cy,height+.18,0,0,0,"<box><size>{:.3f} {:.3f} 0.36</size></box>".format(width+.35,depth+.35),"0.20 0.23 0.27 1")
+    roof_height=min(.36,height)
+    roof=_visual_model(name+"_roof",cx,cy,height-roof_height/2.,0,0,0,"<box><size>{:.3f} {:.3f} {:.3f}</size></box>".format(width,depth,roof_height),"0.20 0.23 0.27 1")
     return body+roof
 
 

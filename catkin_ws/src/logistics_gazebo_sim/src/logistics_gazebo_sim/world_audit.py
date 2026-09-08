@@ -8,6 +8,20 @@ def audit_world(path,max_models=100,max_bytes=250000):
     if world is None:return {"path":path,"pass":False,"errors":["missing world"]}
     models=world.findall("model");collisions=world.findall("model/link/collision");visuals=world.findall("model/link/visual")
     names=[model.get("name","") for model in models];errors=[]
+    by_name={model.get("name"):model for model in models}
+    for name,roof in by_name.items():
+        if not name.endswith("_roof"):continue
+        try:
+            body=by_name[name[:-5]]
+            visual_size=list(map(float,roof.find("link/visual/geometry/box/size").text.split()))
+            collision_size=list(map(float,body.find("link/collision/geometry/box/size").text.split()))
+            visual_pose=list(map(float,roof.find("pose").text.split()))
+            collision_pose=list(map(float,body.find("pose").text.split()))
+            if any(visual_pose[3:]+collision_pose[3:]):raise ValueError("rotated roof requires oriented collision audit")
+            if any(abs(visual_pose[a]-collision_pose[a])+visual_size[a]/2.>collision_size[a]/2.+1e-6 for a in range(3)):
+                errors.append(name+": roof visual exceeds collision volume")
+        except (KeyError,AttributeError,TypeError,ValueError,IndexError):
+            errors.append(name+": invalid or unsupported roof geometry")
     if root.get("version")!="1.6":errors.append("SDF must remain Gazebo Classic 1.6")
     if len(names)!=len(set(names)):errors.append("model names must be unique")
     if len(models)>max_models:errors.append("model budget exceeded")

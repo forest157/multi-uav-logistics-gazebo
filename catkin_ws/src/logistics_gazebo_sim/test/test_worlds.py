@@ -6,6 +6,19 @@ from logistics_gazebo_sim.worlds import render_world
 
 
 class WorldTest(unittest.TestCase):
+    def test_roof_visual_is_contained_in_building_collision(self):
+        for scene_id in SCENES:
+            models={m.get("name"):m for m in ElementTree.fromstring(render_world(scene_id)).findall("world/model")}
+            for name,roof in models.items():
+                if not name.endswith("_roof"):continue
+                body=models[name[:-5]]
+                roof_size=list(map(float,roof.find("link/visual/geometry/box/size").text.split()))
+                body_size=list(map(float,body.find("link/collision/geometry/box/size").text.split()))
+                roof_center=list(map(float,roof.find("pose").text.split()))[:3]
+                body_center=list(map(float,body.find("pose").text.split()))[:3]
+                for axis in range(3):
+                    self.assertLessEqual(abs(roof_center[axis]-body_center[axis])+roof_size[axis]/2.,body_size[axis]/2.+1e-6)
+
     def test_all_scenes_are_valid_classic_sdf(self):
         for scene_id in SCENES:
             root = ElementTree.fromstring(render_world(scene_id))
