@@ -1,0 +1,33 @@
+schema_version: 1
+coordinate_system: ENU
+linear_unit: metre
+world_extent_m: [100.0, 100.0]
+compatibility: {simulator: Gazebo Classic 11, sdf: '1.6', ros: Noetic, autopilot: PX4 SITL}
+assets:
+- id: procedural_service_road
+  source: project-authored
+  license: MIT
+  dimensions: {width_m: 7.0, marking_length_m: 2.4, marking_width_m: 0.12}
+  collision: false
+  rationale: Ground-level visual context must not diverge from the planner collision map.
+- id: procedural_building_shell
+  source: project-authored
+  license: MIT
+  dimensions: scene-defined metric footprint and height
+  collision: true
+  rationale: One conservative primitive is shared with clearance analysis.
+- id: procedural_roof_detail
+  source: project-authored
+  license: MIT
+  dimensions: building footprint plus 0.35 m, height 0.36 m
+  collision: false
+  rationale: Lightweight visual detail above an already conservative building collision.
+- id: start_goal_decals
+  source: project-authored
+  license: MIT
+  dimensions: {radius_m: 1.5, thickness_m: 0.02}
+  collision: false
+  rationale: Landing markers must never cause touchdown bounce.
+external_assets:
+  imported: []
+  policy: Every future third-party asset requires immutable source URL, version, license, attribution, metric dimensions, collision review and performance budget before import.
