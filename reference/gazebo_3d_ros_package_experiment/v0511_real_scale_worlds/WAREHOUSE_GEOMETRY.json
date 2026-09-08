@@ -1,0 +1,507 @@
+{
+  "world_sha256": "bd05d247e4715b7810c1f1edd8353a907af5bd8b81391c126dcb73803b7906bf",
+  "unit": "metre",
+  "purpose": "collision extent inventory only; enclosing wall bounds are not solid occupancy",
+  "models": [
+    {
+      "name": "aws_robomaker_warehouse_ShelfF_01_001",
+      "minimum": [
+        -6.83859,
+        -9.98003,
+        0.0
+      ],
+      "maximum": [
+        -4.7367,
+        8.06676,
+        6.5294
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfF_01/meshes/aws_robomaker_warehouse_ShelfF_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "2a1fb6e3429942f77d959aefdc608a6c0d9655759524e8921f8a4e9671660bb8"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_WallB_01_001",
+      "minimum": [
+        -6.99023,
+        -10.45333,
+        0.0
+      ],
+      "maximum": [
+        6.99024,
+        10.45333,
+        9.01986
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_WallB_01/meshes/aws_robomaker_warehouse_WallB_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "25abc9a936e6c94075847eb15f689dde08c43807fff9f40ec471acfb80021280"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ShelfE_01_001",
+      "minimum": [
+        2.77244,
+        0.13943,
+        0.02929
+      ],
+      "maximum": [
+        6.69075,
+        1.01916,
+        2.64267
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfE_01/meshes/aws_robomaker_warehouse_ShelfE_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "ae1d25d5770ab46af26d27f60e36a5cab3fd506401a3e07b73b44eb0b4cdf920"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ShelfE_01_002",
+      "minimum": [
+        2.77244,
+        -5.26704,
+        0.02929
+      ],
+      "maximum": [
+        6.69075,
+        -4.38732,
+        2.64267
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfE_01/meshes/aws_robomaker_warehouse_ShelfE_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "ae1d25d5770ab46af26d27f60e36a5cab3fd506401a3e07b73b44eb0b4cdf920"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ShelfE_01_003",
+      "minimum": [
+        2.77244,
+        -9.1051,
+        0.02929
+      ],
+      "maximum": [
+        6.69075,
+        -8.22537,
+        2.64267
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfE_01/meshes/aws_robomaker_warehouse_ShelfE_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "ae1d25d5770ab46af26d27f60e36a5cab3fd506401a3e07b73b44eb0b4cdf920"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ShelfD_01_001",
+      "minimum": [
+        2.77244,
+        -1.68266,
+        0.02929
+      ],
+      "maximum": [
+        6.69075,
+        -0.80294,
+        2.64267
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfD_01/meshes/aws_robomaker_warehouse_ShelfD_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "1ecb3254a361230311251886165dab5150ba006088e5f1ad94284ae5c2fc6364"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ShelfD_01_002",
+      "minimum": [
+        2.77244,
+        -3.47855,
+        0.02929
+      ],
+      "maximum": [
+        6.69075,
+        -2.59883,
+        2.64267
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfD_01/meshes/aws_robomaker_warehouse_ShelfD_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "1ecb3254a361230311251886165dab5150ba006088e5f1ad94284ae5c2fc6364"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ShelfD_01_003",
+      "minimum": [
+        2.77244,
+        -7.19054,
+        0.02929
+      ],
+      "maximum": [
+        6.69075,
+        -6.31082,
+        2.64267
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ShelfD_01/meshes/aws_robomaker_warehouse_ShelfD_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "1ecb3254a361230311251886165dab5150ba006088e5f1ad94284ae5c2fc6364"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_GroundB_01_001",
+      "minimum": [
+        -6.99023,
+        -10.45333,
+        -0.09009
+      ],
+      "maximum": [
+        6.99023,
+        10.45333,
+        0.03423
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_GroundB_01/meshes/aws_robomaker_warehouse_GroundB_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "82482bea3e67f61b43dd385f83e9478142310a88f6c407cec550c523d547891d"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_Lamp_01_005",
+      "minimum": [
+        -0.51081,
+        -0.50334,
+        8.50012
+      ],
+      "maximum": [
+        0.51256,
+        0.50335,
+        10.01806
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_Lamp_01/meshes/aws_robomaker_warehouse_Lamp_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "262dccf5d5ff7d1859db119ff438c975bdf14e09fdcb8d36184c8afeca6f7be0"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_Bucket_01_020",
+      "minimum": [
+        -0.18132,
+        9.15652,
+        0.00491
+      ],
+      "maximum": [
+        1.04822,
+        10.10689,
+        1.40906
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_Bucket_01/meshes/aws_robomaker_warehouse_Bucket_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "c619575cdd23ec8f42fb583317f619ff8b74f287dc7a46ebb5b9837e76d3c28b"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_Bucket_01_021",
+      "minimum": [
+        -2.44687,
+        -6.85038,
+        0.00491
+      ],
+      "maximum": [
+        -1.21733,
+        -5.90002,
+        1.40906
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_Bucket_01/meshes/aws_robomaker_warehouse_Bucket_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "c619575cdd23ec8f42fb583317f619ff8b74f287dc7a46ebb5b9837e76d3c28b"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_Bucket_01_022",
+      "minimum": [
+        -0.18132,
+        8.11482,
+        0.00491
+      ],
+      "maximum": [
+        1.04822,
+        9.06518,
+        1.40906
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_Bucket_01/meshes/aws_robomaker_warehouse_Bucket_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "c619575cdd23ec8f42fb583317f619ff8b74f287dc7a46ebb5b9837e76d3c28b"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringA_01_016",
+      "minimum": [
+        4.62383,
+        7.61643,
+        0.01252
+      ],
+      "maximum": [
+        6.78458,
+        9.61814,
+        1.09804
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringA_01/meshes/aws_robomaker_warehouse_ClutteringA_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "f2e592215a2e3fef5161da3e0a53339f83c7ccc059a75bce6dfc52e23eafa024"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringA_01_017",
+      "minimum": [
+        2.32433,
+        7.61643,
+        0.01252
+      ],
+      "maximum": [
+        4.48508,
+        9.61814,
+        1.09804
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringA_01/meshes/aws_robomaker_warehouse_ClutteringA_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "f2e592215a2e3fef5161da3e0a53339f83c7ccc059a75bce6dfc52e23eafa024"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringA_01_018",
+      "minimum": [
+        -2.49936,
+        4.15142,
+        0.01252
+      ],
+      "maximum": [
+        -0.50206,
+        6.31068,
+        1.09804
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringA_01/meshes/aws_robomaker_warehouse_ClutteringA_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "f2e592215a2e3fef5161da3e0a53339f83c7ccc059a75bce6dfc52e23eafa024"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringC_01_027",
+      "minimum": [
+        2.2889,
+        2.92867,
+        0.01794
+      ],
+      "maximum": [
+        4.36102,
+        4.71623,
+        1.77825
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringC_01/meshes/aws_robomaker_warehouse_ClutteringC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "17ea0446b4310bc2828ba9abe48a86bed674f410611c389ff60cd7ff199b2440"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringC_01_028",
+      "minimum": [
+        4.50086,
+        2.91711,
+        0.01434
+      ],
+      "maximum": [
+        6.58256,
+        4.71584,
+        1.77465
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringC_01/meshes/aws_robomaker_warehouse_ClutteringC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "17ea0446b4310bc2828ba9abe48a86bed674f410611c389ff60cd7ff199b2440"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringC_01_029",
+      "minimum": [
+        4.48894,
+        5.09979,
+        0.03
+      ],
+      "maximum": [
+        6.27953,
+        7.17451,
+        1.79031
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringC_01/meshes/aws_robomaker_warehouse_ClutteringC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "17ea0446b4310bc2828ba9abe48a86bed674f410611c389ff60cd7ff199b2440"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringC_01_030",
+      "minimum": [
+        2.34071,
+        5.09979,
+        0.03
+      ],
+      "maximum": [
+        4.13129,
+        7.17451,
+        1.79031
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringC_01/meshes/aws_robomaker_warehouse_ClutteringC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "17ea0446b4310bc2828ba9abe48a86bed674f410611c389ff60cd7ff199b2440"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringC_01_031",
+      "minimum": [
+        -2.46897,
+        1.26464,
+        0.01434
+      ],
+      "maximum": [
+        -0.67839,
+        3.33935,
+        1.77465
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringC_01/meshes/aws_robomaker_warehouse_ClutteringC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "17ea0446b4310bc2828ba9abe48a86bed674f410611c389ff60cd7ff199b2440"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringC_01_032",
+      "minimum": [
+        -2.25566,
+        8.51322,
+        0.01434
+      ],
+      "maximum": [
+        -0.18354,
+        10.30078,
+        1.77465
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringC_01/meshes/aws_robomaker_warehouse_ClutteringC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "17ea0446b4310bc2828ba9abe48a86bed674f410611c389ff60cd7ff199b2440"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_ClutteringD_01_005",
+      "minimum": [
+        -2.14312,
+        -8.57266,
+        0.01342
+      ],
+      "maximum": [
+        -1.12624,
+        -7.05096,
+        1.50508
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_ClutteringD_01/meshes/aws_robomaker_warehouse_ClutteringD_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "602a9683515439e085c8af2f9e2dca905210c7daeff093f1d74a5175d57f6ee0"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_TrashCanC_01_002",
+      "minimum": [
+        -2.33192,
+        7.26098,
+        0.033
+      ],
+      "maximum": [
+        -0.85296,
+        8.16986,
+        1.30823
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_TrashCanC_01/meshes/aws_robomaker_warehouse_TrashCanC_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "83741a96a3181a38c68cedd03a43c723275dfc448bffaaae8af8674d3572540e"
+        }
+      ]
+    },
+    {
+      "name": "aws_robomaker_warehouse_PalletJackB_01_001",
+      "minimum": [
+        -0.7862,
+        -9.76702,
+        0.03521
+      ],
+      "maximum": [
+        0.37468,
+        -9.22719,
+        1.00122
+      ],
+      "meshes": [
+        {
+          "path": "models/aws_robomaker_warehouse_PalletJackB_01/meshes/aws_robomaker_warehouse_PalletJackB_01_collision.DAE",
+          "unit_meter": 0.01,
+          "sha256": "ca7886559e76cad6700c37f726b2285abdaa7364265042a639ebc70c31b9993e"
+        }
+      ]
+    }
+  ]
+}

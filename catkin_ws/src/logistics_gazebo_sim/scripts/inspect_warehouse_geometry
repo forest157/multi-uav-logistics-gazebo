@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Inventory pinned warehouse collision meshes; bounds are not occupancy maps."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import xml.etree.ElementTree as ET
+import numpy as np
+
+NS={'c':'http://www.collada.org/2005/11/COLLADASchema'}
+
+def pose(text):
+    x,y,z,r,p,yaw=map(float,(text or '0 0 0 0 0 0').split())
+    cr,sr=np.cos(r),np.sin(r);cp,sp=np.cos(p),np.sin(p);cy,sy=np.cos(yaw),np.sin(yaw)
+    result=np.eye(4)
+    result[:3,:3]=[[cy*cp,cy*sp*sr-sy*cr,cy*sp*cr+sy*sr],
+        [sy*cp,sy*sp*sr+cy*cr,sy*sp*cr-cy*sr],[-sp,cp*sr,cp*cr]]
+    result[:3,3]=[x,y,z]
+    return result
+
+def mesh_points(path):
+    root=ET.parse(path).getroot()
+    if root.findtext('c:asset/c:up_axis',namespaces=NS)!='Z_UP':raise ValueError('unsupported mesh axis')
+    unit=float(root.find('c:asset/c:unit',NS).get('meter'))
+    geometries={g.get('id'):g for g in root.findall('c:library_geometries/c:geometry',NS)}
+    points=[]
+    def visit(node,parent):
+        matrix=parent.copy()
+        for child in node:
+            tag=child.tag.split('}')[-1]
+            if tag=='matrix':
+                local=np.array(list(map(float,child.text.split()))).reshape(4,4)
+                if not np.allclose(local[3], [0,0,0,1]):raise ValueError('non-affine Collada matrix')
+                matrix=matrix@local
+            elif tag in ('translate','rotate','scale','lookat','skew'):raise ValueError('unsupported Collada transform: '+tag)
+        for instance in node.findall('c:instance_geometry',NS):
+            mesh=geometries[instance.get('url').lstrip('#')].find('c:mesh',NS)
+            for vertices in mesh.findall('c:vertices',NS):
+                source_id=vertices.find('c:input[@semantic="POSITION"]',NS).get('source').lstrip('#')
+                source=next(s for s in mesh.findall('c:source',NS) if s.get('id')==source_id)
+                accessor=source.find('c:technique_common/c:accessor',NS)
+                if int(accessor.get('stride','1'))!=3 or int(accessor.get('offset','0'))!=0:raise ValueError('unsupported accessor')
+                xyz=np.array(list(map(float,source.find('c:float_array',NS).text.split()))).reshape(-1,3)
+                transformed=(matrix@np.column_stack((xyz,np.ones(len(xyz)))).T).T[:,:3]*unit
+                points.extend(transformed)
+        for child in node.findall('c:node',NS):visit(child,matrix)
+    scene_id=root.find('c:scene/c:instance_visual_scene',NS).get('url').lstrip('#')
+    scene=next(s for s in root.findall('c:library_visual_scenes/c:visual_scene',NS) if s.get('id')==scene_id)
+    for node in scene.findall('c:node',NS):visit(node,np.eye(4))
+    if not points:raise ValueError('mesh has no positions')
+    return np.array(points),unit
+
+def inspect(asset_root):
+    asset_root=Path(asset_root).resolve();world=asset_root/'worlds/no_roof_small_warehouse.world'
+    report={'world_sha256':hashlib.sha256(world.read_bytes()).hexdigest(),'unit':'metre',
+        'purpose':'collision extent inventory only; enclosing wall bounds are not solid occupancy',
+        'models':[]}
+    for instance in ET.parse(world).findall('world/model'):
+        uri=instance.findtext('include/uri');model_name=uri.removeprefix('model://') if hasattr(uri,'removeprefix') else uri[len('model://'):]
+        model=ET.parse(asset_root/'models'/model_name/'model.sdf').find('model')
+        transform=pose(instance.findtext('pose'))@pose(model.findtext('pose'));cloud=[];meshes=[]
+        for link in model.findall('link'):
+            for collision in link.findall('collision'):
+                mesh=collision.find('geometry/mesh')
+                if mesh is None:raise ValueError('non-mesh collision needs explicit support')
+                path=(asset_root/'models'/mesh.findtext('uri')[len('model://'):]).resolve()
+                if asset_root not in path.parents:raise ValueError('mesh outside asset root')
+                xyz,unit=mesh_points(path);xyz*=np.array(list(map(float,mesh.findtext('scale','1 1 1').split())))
+                matrix=transform@pose(link.findtext('pose'))@pose(collision.findtext('pose'))
+                cloud.extend((matrix@np.column_stack((xyz,np.ones(len(xyz)))).T).T[:,:3])
+                meshes.append({'path':str(path.relative_to(asset_root)),'unit_meter':unit,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+        if not cloud:raise ValueError('model missing collision geometry')
+        xyz=np.array(cloud)
+        report['models'].append({'name':instance.get('name'),'minimum':xyz.min(axis=0).round(5).tolist(),
+            'maximum':xyz.max(axis=0).round(5).tolist(),'meshes':meshes})
+    return report
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('asset_root');parser.add_argument('--output',required=True)
+    args=parser.parse_args();result=inspect(args.asset_root)
+    Path(args.output).write_text(json.dumps(result,indent=2)+'\n')
+    print('Inspected {} collision models'.format(len(result['models'])))

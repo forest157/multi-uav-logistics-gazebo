@@ -29,5 +29,18 @@ assets:
   collision: false
   rationale: Landing markers must never cause touchdown bounce.
 external_assets:
-  imported: []
+  imported:
+  - id: aws_small_warehouse
+    source: https://github.com/aws-robotics/aws-robomaker-small-warehouse-world
+    revision: 3c23a698bf0b4e366ddf8b084af507c519bd3483
+    archive_sha256: 213417f3b243cc6259a17b1eeafba28edd44f7d129ec5904f88793f1bc75d0e6
+    license: MIT-0
+    attribution: Amazon.com, Inc. or its affiliates; original LICENSE retained in downloaded archive
+    status: experimental-cache-only-not-mission-ready
+    world: worlds/no_roof_small_warehouse.world
+    dimensions_m: [13.98047, 20.90666, 9.01986]
+    dimensions_basis: enclosing wall collision mesh bounds, not usable flight volume
+    mesh_unit_meter: 0.01
+    collision_review: extent inventory only; triangle occupancy and Gazebo equivalence pending
+    performance_budget: pending; no release approval
   policy: Every future third-party asset requires immutable source URL, version, license, attribution, metric dimensions, collision review and performance budget before import.
