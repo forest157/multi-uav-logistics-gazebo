@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Upstream MIT-0 assets are cached outside the source tree.
+revision=3c23a698bf0b4e366ddf8b084af507c519bd3483
+digest=213417f3b243cc6259a17b1eeafba28edd44f7d129ec5904f88793f1bc75d0e6
+cache_root="${1:-/home/devuser/.cache/logistics_worlds}"
+mkdir -p "$cache_root"
+staging=$(mktemp -d "$cache_root/download.XXXXXXXX")
+curl -fL --retry 2 "https://codeload.github.com/aws-robotics/aws-robomaker-small-warehouse-world/tar.gz/$revision" -o "$staging/source.tar.gz"
+printf '%s  %s\n' "$digest" "$staging/source.tar.gz" | sha256sum -c -
+tar -xzf "$staging/source.tar.gz" -C "$staging" --no-same-owner
+asset_root="$staging/aws-robomaker-small-warehouse-world-$revision"
+test -f "$asset_root/LICENSE"
+test -f "$asset_root/worlds/no_roof_small_warehouse.world"
+printf 'ASSET_ROOT=%s\n' "$asset_root"
+printf 'Run: GAZEBO_MODEL_PATH="%s/models:${GAZEBO_MODEL_PATH:-}" gazebo "%s/worlds/no_roof_small_warehouse.world"\n' "$asset_root" "$asset_root"
