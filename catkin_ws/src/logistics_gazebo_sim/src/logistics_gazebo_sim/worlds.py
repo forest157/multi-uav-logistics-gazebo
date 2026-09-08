@@ -88,3 +88,29 @@ def write_worlds(output_dir):
             stream.write(render_world(scene_id))
         paths.append(path)
     return paths
+
+
+def render_outdoor_world():
+    """Large, deterministic outdoor logistics yard for multi-UAV tests."""
+    header = HEADER.format(name="outdoor_logistics_yard")
+    chunks = [header]
+    # Concrete road grid is visual-only; buildings below remain the occupancy model.
+    for name, x, y, yaw in (("road_east_west", 0, 0, 0), ("road_north_south", 0, 0, math.pi / 2)):
+        chunks.append(_visual_model(name, x, y, .012, 0, 0, yaw,
+            "<box><size>110 8 0.02</size></box>", "0.12 0.13 0.14 1"))
+    for i, (x, y) in enumerate(((-42, -30), (-14, -30), (14, -30), (42, -30),
+                                (-42, 30), (-14, 30), (14, 30), (42, 30))):
+        chunks.append(_model("warehouse_{:02d}".format(i), x, y, 4,
+            "<box><size>18 14 8</size></box>", "0.43 0.47 0.52 1"))
+        chunks.append(_visual_model("warehouse_{:02d}_roof".format(i), x, y, 7.82, 0, 0, 0,
+            "<box><size>18 14 .36</size></box>", "0.20 0.23 0.27 1"))
+    for i, (x, y) in enumerate(((-45, -12), (-45, 12), (45, -12), (45, 12))):
+        chunks.append(_model("tree_obstacle_{:02d}".format(i), x, y, 3,
+            "<cylinder><radius>2</radius><length>6</length></cylinder>", "0.16 0.42 0.18 1"))
+    for i, (x, y) in enumerate(((-18, -4), (0, -4), (18, -4))):
+        chunks.append(_marker("uav_pad_{:02d}".format(i), (x, y), "0.1 0.8 0.1 1"))
+    chunks.append(_marker("delivery_zone", (0, 42), "0.9 0.15 0.1 1"))
+    chunks.append(FOOTER)
+    result = "".join(chunks)
+    ElementTree.fromstring(result)
+    return result
