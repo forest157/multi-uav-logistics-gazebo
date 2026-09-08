@@ -1,0 +1,97 @@
+{
+  "extent_m": [
+    180,
+    160
+  ],
+  "road_width_m": 10,
+  "blocks": [
+    [
+      -55,
+      -38,
+      24,
+      22,
+      10
+    ],
+    [
+      -55,
+      38,
+      24,
+      22,
+      10
+    ],
+    [
+      0,
+      -38,
+      24,
+      22,
+      16
+    ],
+    [
+      0,
+      38,
+      24,
+      22,
+      16
+    ],
+    [
+      55,
+      -38,
+      24,
+      22,
+      12
+    ],
+    [
+      55,
+      38,
+      24,
+      22,
+      12
+    ]
+  ],
+  "roads": [
+    [
+      0,
+      0,
+      170,
+      10
+    ],
+    [
+      -28,
+      0,
+      10,
+      150
+    ],
+    [
+      28,
+      0,
+      10,
+      150
+    ]
+  ],
+  "pads": [
+    [
+      -60,
+      -65
+    ],
+    [
+      -45,
+      -65
+    ],
+    [
+      -30,
+      -65
+    ]
+  ],
+  "goal": [
+    60,
+    65
+  ],
+  "description": "Open campus with separated teaching and office buildings",
+  "coordinate_system": "ENU",
+  "linear_unit": "metre",
+  "start": [
+    -60,
+    -65
+  ],
+  "status": "layout_only_pending_mission_integration"
+}

@@ -110,11 +110,53 @@ def render_outdoor_world():
     start = (-18.0, -4.0)
     goal = (0.0, 42.0)
     for i, (x, y) in enumerate(((-18, -4), (0, -4), (18, -4))):
-        chunks.append(_marker("uav_pad_{:02d}".format(i), (x, y), "0.1 0.8 0.1 1"))
-    chunks.append(_marker("start_zone", start, "0.1 0.8 0.1 1"))
-    chunks.append(_marker("goal_zone", goal, "0.9 0.15 0.1 1"))
-    chunks.append(_marker("delivery_zone", goal, "0.9 0.15 0.1 1"))
+        chunks.append(_metric_marker("uav_pad_{:02d}".format(i), (x, y), "0.1 0.8 0.1 1"))
+    chunks.append(_metric_marker("start_zone", start, "0.1 0.8 0.1 1"))
+    chunks.append(_metric_marker("goal_zone", goal, "0.9 0.15 0.1 1"))
     chunks.append(FOOTER)
     result = "".join(chunks)
     ElementTree.fromstring(result)
     return result
+
+
+def _metric_marker(name, point, colour):
+    # Legacy _marker accepts reference-image coordinates, not metres.
+    return _visual_model(name, point[0], point[1], -0.009, 0, 0, 0,
+                         '<cylinder><radius>1.5</radius><length>0.02</length></cylinder>', colour)
+
+
+OUTDOOR_LAYOUTS = {
+    'outdoor_campus': dict(extent_m=[180, 160], road_width_m=10,
+        blocks=[(x, y, 24, 22, h) for x, h in ((-55, 10), (0, 16), (55, 12)) for y in (-38, 38)],
+        roads=[(0, 0, 170, 10), (-28, 0, 10, 150), (28, 0, 10, 150)],
+        pads=[(-60, -65), (-45, -65), (-30, -65)], goal=[60, 65],
+        description='Open campus with separated teaching and office buildings'),
+    'outdoor_residential': dict(extent_m=[200, 180], road_width_m=8,
+        blocks=[(x, y, 18, 16, 6 + (i % 3) * 3) for i, x in enumerate((-66, -22, 22, 66)) for y in (-50, 0, 50)],
+        roads=[(0, y, 190, 8) for y in (-25, 25)] + [(x, 0, 8, 170) for x in (-44, 0, 44)],
+        pads=[(-75, -75), (-60, -75), (-45, -75)], goal=[75, 75],
+        description='Residential delivery with multiple low-rise blocks'),
+    'outdoor_urban': dict(extent_m=[240, 220], road_width_m=10,
+        blocks=[(x, y, 30, 28, 14 + ((i + j) % 3) * 8)
+                for i, x in enumerate((-78, -26, 26, 78)) for j, y in enumerate((-65, 0, 65))],
+        roads=[(0, y, 230, 10) for y in (-32.5, 32.5)] + [(x, 0, 10, 210) for x in (-52, 0, 52)],
+        pads=[(-90, -95), (-75, -95), (-60, -95)], goal=[90, 95],
+        description='Dense urban blocks with varied building heights'),
+}
+
+
+def render_outdoor_variant(name):
+    layout = OUTDOOR_LAYOUTS[name]
+    chunks = [HEADER.format(name=name)]
+    for i, (x, y, width, depth) in enumerate(layout['roads']):
+        chunks.append(_visual_model('road_' + str(i), x, y, .012, 0, 0, 0,
+            '<box><size>{} {} 0.02</size></box>'.format(width, depth), '0.12 0.13 0.14 1'))
+    for i, (x, y, width, depth, height) in enumerate(layout['blocks']):
+        chunks.append(_model('building_' + str(i), x, y, height / 2,
+            '<box><size>{} {} {}</size></box>'.format(width, depth, height),
+            ('0.55 0.60 0.65 1', '0.65 0.54 0.43 1', '0.45 0.52 0.48 1')[i % 3]))
+    for i, point in enumerate(layout['pads']):
+        chunks.append(_metric_marker('start_zone' if i == 0 else 'uav_pad_' + str(i), point, '0.1 0.8 0.1 1'))
+    chunks.append(_metric_marker('goal_zone', layout['goal'], '0.9 0.15 0.1 1'))
+    chunks.append(FOOTER)
+    return ''.join(chunks)

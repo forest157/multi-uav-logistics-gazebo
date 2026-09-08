@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import os
-from logistics_gazebo_sim.worlds import write_worlds, render_outdoor_world
+import json
+from logistics_gazebo_sim.worlds import write_worlds, render_outdoor_world, OUTDOOR_LAYOUTS, render_outdoor_variant
 
 parser = argparse.ArgumentParser()
 parser.add_argument("output_dir")
@@ -12,3 +13,13 @@ outdoor = os.path.join(args.output_dir, "outdoor_logistics.world")
 with open(outdoor, "w", encoding="utf-8") as stream:
     stream.write(render_outdoor_world())
 print(outdoor)
+for name, layout in OUTDOOR_LAYOUTS.items():
+    path = os.path.join(args.output_dir, name + '.world')
+    with open(path, 'w', encoding='utf-8') as stream:
+        stream.write(render_outdoor_variant(name))
+    metadata = dict(layout, coordinate_system='ENU', linear_unit='metre',
+                    start=layout['pads'][0], status='layout_only_pending_mission_integration')
+    with open(os.path.join(args.output_dir, name + '.json'), 'w', encoding='utf-8') as stream:
+        json.dump(metadata, stream, indent=2)
+        stream.write('\n')
+    print(path)
