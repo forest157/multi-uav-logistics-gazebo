@@ -107,9 +107,13 @@ def render_outdoor_world():
     for i, (x, y) in enumerate(((-45, -12), (-45, 12), (45, -12), (45, 12))):
         chunks.append(_model("tree_obstacle_{:02d}".format(i), x, y, 3,
             "<cylinder><radius>2</radius><length>6</length></cylinder>", "0.16 0.42 0.18 1"))
+    start = (-18.0, -4.0)
+    goal = (0.0, 42.0)
     for i, (x, y) in enumerate(((-18, -4), (0, -4), (18, -4))):
         chunks.append(_marker("uav_pad_{:02d}".format(i), (x, y), "0.1 0.8 0.1 1"))
-    chunks.append(_marker("delivery_zone", (0, 42), "0.9 0.15 0.1 1"))
+    chunks.append(_marker("start_zone", start, "0.1 0.8 0.1 1"))
+    chunks.append(_marker("goal_zone", goal, "0.9 0.15 0.1 1"))
+    chunks.append(_marker("delivery_zone", goal, "0.9 0.15 0.1 1"))
     chunks.append(FOOTER)
     result = "".join(chunks)
     ElementTree.fromstring(result)
