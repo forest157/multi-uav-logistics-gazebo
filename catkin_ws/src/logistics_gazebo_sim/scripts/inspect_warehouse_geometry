@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import numpy as np
@@ -50,33 +51,67 @@ def mesh_points(path):
     if not points:raise ValueError('mesh has no positions')
     return np.array(points),unit
 
-def inspect(asset_root):
+def triangle_surface_boxes(triangles):
+    """Conservative triangle covers, not solid-volume or free-space certification."""
+    triangles=np.asarray(triangles, dtype=float)
+    if triangles.ndim!=3 or triangles.shape[1:]!=(3,3) or not len(triangles):
+        raise ValueError('expected nonempty Nx3x3 triangles')
+    if not np.isfinite(triangles).all():raise ValueError('nonfinite triangles')
+    # Do not round inward: each box must contain every point of its triangle.
+    return np.unique(np.stack((triangles.min(axis=1), triangles.max(axis=1)), axis=1), axis=0).tolist()
+
+def inspect(asset_root, gazebo_exporter=None):
     asset_root=Path(asset_root).resolve();world=asset_root/'worlds/no_roof_small_warehouse.world'
     report={'world_sha256':hashlib.sha256(world.read_bytes()).hexdigest(),'unit':'metre',
         'purpose':'collision extent inventory only; enclosing wall bounds are not solid occupancy',
         'models':[]}
+    native_cache={}
     for instance in ET.parse(world).findall('world/model'):
         uri=instance.findtext('include/uri');model_name=uri.removeprefix('model://') if hasattr(uri,'removeprefix') else uri[len('model://'):]
         model=ET.parse(asset_root/'models'/model_name/'model.sdf').find('model')
-        transform=pose(instance.findtext('pose'))@pose(model.findtext('pose'));cloud=[];meshes=[]
+        transform=pose(instance.findtext('pose'))@pose(model.findtext('pose'));cloud=[];meshes=[];surface=[]
         for link in model.findall('link'):
             for collision in link.findall('collision'):
                 mesh=collision.find('geometry/mesh')
                 if mesh is None:raise ValueError('non-mesh collision needs explicit support')
                 path=(asset_root/'models'/mesh.findtext('uri')[len('model://'):]).resolve()
                 if asset_root not in path.parents:raise ValueError('mesh outside asset root')
-                xyz,unit=mesh_points(path);xyz*=np.array(list(map(float,mesh.findtext('scale','1 1 1').split())))
+                xyz,unit=mesh_points(path)
+                metadata={'path':str(path.relative_to(asset_root)),'unit_meter':unit,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+                if gazebo_exporter:
+                    if path not in native_cache:
+                        native_cache[path]=np.asarray(json.loads(subprocess.check_output(
+                            [str(gazebo_exporter),str(path)], timeout=30)), dtype=float)
+                    triangles=native_cache[path]
+                    triangle_surface_boxes(triangles)  # validate shape and finite coordinates
+                    native=triangles.reshape(-1,3)
+                    error=float(np.max(np.abs(np.array([xyz.min(0),xyz.max(0)])-
+                                              np.array([native.min(0),native.max(0)]))))
+                    if error>1e-4:raise ValueError('Gazebo extent mismatch {}: {} m'.format(path,error))
+                    metadata.update(gazebo_extent_max_error_m=error, gazebo_triangles=len(triangles))
+                scale=np.array(list(map(float,mesh.findtext('scale','1 1 1').split())))
+                xyz*=scale
                 matrix=transform@pose(link.findtext('pose'))@pose(collision.findtext('pose'))
                 cloud.extend((matrix@np.column_stack((xyz,np.ones(len(xyz)))).T).T[:,:3])
-                meshes.append({'path':str(path.relative_to(asset_root)),'unit_meter':unit,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+                if gazebo_exporter and model_name=='aws_robomaker_warehouse_WallB_01':
+                    vertices=triangles.reshape(-1,3)*scale
+                    world_triangles=(matrix@np.column_stack((vertices,np.ones(len(vertices)))).T).T[:,:3].reshape(-1,3,3)
+                    surface.extend(triangle_surface_boxes(world_triangles))
+                meshes.append(metadata)
         if not cloud:raise ValueError('model missing collision geometry')
         xyz=np.array(cloud)
         report['models'].append({'name':instance.get('name'),'minimum':xyz.min(axis=0).round(5).tolist(),
             'maximum':xyz.max(axis=0).round(5).tolist(),'meshes':meshes})
+        if surface:report['models'][-1]['triangle_surface_boxes']=surface
+    if gazebo_exporter:
+        report['gazebo_mesh_loader_check']={'unique_meshes':len(native_cache),'extent_tolerance_m':1e-4,
+            'scope':'local mesh extents only; world physics ray/contact verification pending'}
+        report['wall_cover_warning']='Uninflated triangle surface AABBs, not filled solids. Do not use to certify spawning or teleporting into free space. No flight integration.'
     return report
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('asset_root');parser.add_argument('--output',required=True)
-    args=parser.parse_args();result=inspect(args.asset_root)
+    parser.add_argument('--gazebo-exporter',type=Path)
+    args=parser.parse_args();result=inspect(args.asset_root,args.gazebo_exporter)
     Path(args.output).write_text(json.dumps(result,indent=2)+'\n')
     print('Inspected {} collision models'.format(len(result['models'])))
