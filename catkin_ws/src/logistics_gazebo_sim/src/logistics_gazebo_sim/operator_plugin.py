@@ -58,7 +58,7 @@ class OperatorPlugin(Plugin):
         self.formation.addItem("纵向一字队形（窄通道）","column");self.formation.addItem("垂直错层队形","vertical");self.formation.addItem("三维楔形队形","wedge3d");self.formation.addItem("三维螺旋队形","helix")
         self.dynamic_enabled=QCheckBox("启用交叉移动障碍物与在线风险预测");self.dynamic_enabled.setChecked(True)
         form.addRow("动态避障实验",self.dynamic_enabled)
-        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队偏移（稳定闭环）",("collective_offset","shadow",True));self.avoidance_mode.addItem("3D ORCA（影子模式）",("orca3d","shadow",False));self.avoidance_mode.addItem("分布式 MPC（影子模式）",("distributed_mpc","shadow",False));self.avoidance_mode.addItem("3D ORCA（受限接管）",("orca3d","limited",True));form.addRow("局部避障模式",self.avoidance_mode)
+        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队避障（默认）",("collective_offset","shadow",True));self.avoidance_mode.addItem("ORCA 受限避障",("orca3d","limited",True));self.avoidance_mode.setToolTip("整队避障保持队形；ORCA 使用逐机受限控制。研究用影子模式通过 launch 配置。");form.addRow("局部避障模式",self.avoidance_mode)
         self.perception_source=QComboBox();self.perception_source.addItem("仿真感知（稳定）","perception");self.perception_source.addItem("物理 3D 雷达（实验）","lidar");self.perception_source.addItem("Gazebo 真值（对照）","truth");form.addRow("动态障碍数据源",self.perception_source)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
