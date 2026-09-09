@@ -10,6 +10,27 @@ from logistics_gazebo_sim.lidar_alignment import select_pose, valid_return
 
 
 class LidarAlignmentTest(unittest.TestCase):
+    def test_normal_sensor_and_timer_latency_does_not_starve(self):
+        self.assertEqual(select_pose([(10.,'pose')],10.,10.404,9.),'pose')
+        self.assertIsNone(select_pose([(10.,'pose')],10.,10.501,9.))
+    def test_climbing_peer_echo_filtered_at_scan_time(self):
+        module=importlib.machinery.SourceFileLoader('lidar_peer_filter_test',str(Path(__file__).resolve().parents[1]/'scripts/lidar_cloud_aggregator')).load_module()
+        node=module.LidarCloudAggregator.__new__(module.LidarCloudAggregator)
+        sensor=Pose();sensor.position.z=3; sensor.orientation.w=1
+        peer_old=Pose();peer_old.position.z=3;peer_old.orientation.w=1
+        peer_new=Pose();peer_new.position.z=4.5;peer_new.orientation.w=1
+        scan=PointCloud();scan.header.stamp=rospy.Time.from_sec(10)
+        # First return is a peer body; second is an independent nearby object.
+        scan.points=[Point32(3.3,0,-0.18),Point32(3.3,2,-0.18)]
+        node.poses=[[(10,sensor)],[(10,peer_old),(10.2,peer_new)]]
+        node.clouds=[scan,None];node.consumed=[0.,0.]
+        node.origins=[(0,0),(3.3,0)];node.publisher=Mock()
+        with patch.object(rospy.Time,'now',return_value=rospy.Time.from_sec(10.2)):
+            node.publish_locked()
+        cloud=node.publisher.publish.call_args[0][0]
+        points=list(point_cloud2.read_points(cloud,field_names=('x','y','z')))
+        self.assertEqual(len(points),1)
+        self.assertAlmostEqual(points[0][1],2)
     def test_ros_aggregation_filters_misses_and_does_not_republish(self):
         module=importlib.machinery.SourceFileLoader('lidar_aggregation_test',str(Path(__file__).resolve().parents[1]/'scripts/lidar_cloud_aggregator')).load_module()
         node=module.LidarCloudAggregator.__new__(module.LidarCloudAggregator)

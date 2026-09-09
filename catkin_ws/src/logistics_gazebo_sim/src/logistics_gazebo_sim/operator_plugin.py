@@ -93,7 +93,8 @@ class OperatorPlugin(Plugin):
         self.runtime_marker_pubs=[rospy.Publisher(topic,MarkerArray,queue_size=1,latch=True) for topic in ("/fleet/markers","/dynamic_obstacles/markers")]
         rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
-        self.formation.currentIndexChanged.connect(self.parameters_changed);self.avoidance_mode.currentIndexChanged.connect(self.parameters_changed);self.perception_source.currentIndexChanged.connect(self.parameters_changed)
+        self.formation.currentIndexChanged.connect(self.parameters_changed)
+        self.perception_source.setToolTip("停止仿真后选择，下一次启动生效；仅切换数据源不会重新生成航线。")
         self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb);self.ros_ui_bridge.energy_return_received.connect(self.energy_return_cb)
         rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1)
         rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1)
@@ -109,7 +110,7 @@ class OperatorPlugin(Plugin):
         return (int(self.scene.currentData()),round(self.start_x.value(),3),
                 round(self.start_y.value(),3),round(self.goal_x.value(),3),
                 round(self.goal_y.value(),3),round(self.altitude.value(),3),
-                str(self.formation.currentData()),str(self.avoidance_mode.currentData()),str(self.perception_source.currentData()))
+                str(self.formation.currentData()))
     def parameters_changed(self,_value=None):
         self.publish_preview();self.schedule_analysis()
     def schedule_analysis(self):
@@ -305,6 +306,7 @@ class OperatorPlugin(Plugin):
         algorithm,orca_mode,execution=self.avoidance_mode.currentData()
         self.clear_runtime_markers();self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_state_source:={}".format(self.perception_source.currentData()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
         self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
+        self.set_sensor_controls_enabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
         px4_root=os.path.expanduser("~/PX4_Firmware")
         environment=QProcessEnvironment.systemEnvironment()
@@ -323,12 +325,14 @@ class OperatorPlugin(Plugin):
     def simulation_process_started(self):
         self.state.setText("启动命令已提交，正在等待 Gazebo 与三机 PX4 就绪…")
     def simulation_process_error(self,_error):
+        self.set_sensor_controls_enabled(True)
         self.simulation_start_pending=False
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
         self.state.setText("仿真启动失败")
         QMessageBox.critical(self.widget,"仿真启动失败",
             "无法启动 roslaunch：{}\n请检查 ROS 环境和启动日志。".format(self.process.errorString()))
     def simulation_process_finished(self,exit_code,_exit_status):
+        self.set_sensor_controls_enabled(True)
         self.clear_runtime_markers()
         self.simulation_start_pending=False
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
@@ -340,6 +344,10 @@ class OperatorPlugin(Plugin):
                 "Gazebo/PX4 启动进程已退出，返回代码 {}。\n请查看 roslaunch 日志。".format(exit_code))
         else:self.state.setText("三机仿真已结束")
         self.simulation_stop_requested=False
+    def set_sensor_controls_enabled(self,enabled):
+        for control in (self.perception_source,self.avoidance_mode,self.dynamic_enabled):
+            control.setEnabled(enabled)
+
     def stop_simulation(self):
         if self.process.state()==QProcess.NotRunning:
             result=QProcess.execute("pkill",["-INT","-f",

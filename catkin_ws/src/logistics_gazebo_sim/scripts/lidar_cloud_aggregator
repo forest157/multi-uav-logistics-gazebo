@@ -4,6 +4,7 @@ import math
 from collections import deque
 from threading import RLock
 from logistics_gazebo_sim.lidar_alignment import select_pose, valid_return
+from logistics_gazebo_sim.pointcloud_perception import exclude_near_vehicles
 import rospy
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import PointCloud, PointCloud2
@@ -56,10 +57,19 @@ class LidarCloudAggregator:
         for index,stamp,pose in matched:
             item=self.clouds[index]
             q=pose.orientation;quaternion=(q.x,q.y,q.z,q.w);origin=self.origins[index]
+            # Peer-body echoes belong to scan time, not callback-time position.
+            centers=[]
+            for peer,history in enumerate(self.poses):
+                body=select_pose(history,stamp,now.to_sec(),0.0)
+                if body is not None:
+                    centers.append((body.position.x+self.origins[peer][0],
+                                    body.position.y+self.origins[peer][1],body.position.z))
+            scan_points=[]
             for raw in item.points:
                 if not valid_return((raw.x,raw.y,raw.z)):continue
                 x,y,z=rotate((raw.x,raw.y,raw.z+0.18),quaternion)
-                points.append((x+pose.position.x+origin[0],y+pose.position.y+origin[1],z+pose.position.z))
+                scan_points.append((x+pose.position.x+origin[0],y+pose.position.y+origin[1],z+pose.position.z))
+            points.extend(exclude_near_vehicles(scan_points,centers,1.0))
         for index,stamp,pose in matched:self.consumed[index]=stamp
         stamp=max(s for i,s,p in matched)
         if stamp <= getattr(self,'last_stamp',0.0):return

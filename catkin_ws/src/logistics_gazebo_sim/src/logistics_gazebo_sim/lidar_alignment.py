@@ -11,7 +11,9 @@ def valid_return(point, minimum=0.4, maximum=35.0):
 def select_pose(history, stamp, now, consumed):
     if not all(math.isfinite(v) for v in (stamp, now, consumed)):
         return None
-    if stamp <= consumed or stamp <= 0 or not 0 <= now-stamp <= 0.3 or not history:
+    # 5 Hz block laser can arrive one scan late (0.2 s), followed by a
+    # 0.2 s aggregation tick. Allow that pipeline plus 0.1 s scheduling reserve.
+    if stamp <= consumed or stamp <= 0 or not 0 <= now-stamp <= 0.5 or not history:
         return None
     pose_stamp, pose = min(history, key=lambda item: abs(item[0]-stamp))
     return pose if abs(pose_stamp-stamp) <= 0.05 else None
