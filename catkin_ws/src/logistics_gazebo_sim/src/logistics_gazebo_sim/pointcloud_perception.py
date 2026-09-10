@@ -22,8 +22,12 @@ class VoxelBackground:
         self.frame+=1;keys=set(self.key(point) for point in points);dynamic=[]
         for point in points:
             key=self.key(point)
-            if self.hits.get(key,0)<self.background_hits:dynamic.append(point)
-        for key in keys:self.hits[key]=min(self.background_hits,self.hits.get(key,0)+1);self.last[key]=self.frame
+            if self.last.get(key)!=self.frame-1 or self.hits.get(key,0)<self.background_hits:dynamic.append(point)
+        for key in keys:
+            # Evidence must be consecutive: periodic moving targets must not
+            # become background merely by revisiting a location over time.
+            previous=self.hits.get(key,0) if self.last.get(key)==self.frame-1 else 0
+            self.hits[key]=min(self.background_hits,previous+1);self.last[key]=self.frame
         for key,seen in list(self.last.items()):
             if self.frame-seen>self.forget_after:self.last.pop(key,None);self.hits.pop(key,None)
         return dynamic

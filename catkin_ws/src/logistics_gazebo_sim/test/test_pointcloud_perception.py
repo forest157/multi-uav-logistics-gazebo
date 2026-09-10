@@ -3,6 +3,23 @@ from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator,Voxel
 
 
 class PointCloudPerceptionTest(unittest.TestCase):
+    def test_repeated_moving_target_is_not_absorbed_into_background(self):
+        model=VoxelBackground(voxel_size=.45,background_hits=4)
+        wall=(20.,20.,5.)
+        # Each revisit occurs within the old forget window; the wall persists.
+        for frame in range(40):
+            moving=(float(frame%8),0.,5.)
+            candidates=model.update([wall,moving])
+            self.assertIn(moving,candidates)
+            if frame>=4:self.assertNotIn(wall,candidates)
+
+    def test_reappearing_surface_requires_new_persistence(self):
+        model=VoxelBackground(voxel_size=1,background_hits=2)
+        point=(2,2,2)
+        model.update([point]);model.update([point])
+        self.assertEqual(model.update([point]),[])
+        model.update([])
+        self.assertEqual(model.update([point]),[point])
     def test_confidence_combines_point_support_and_motion(self):
         self.assertEqual(calibrated_detection_confidence({"point_count":30},3,4),1.0)
         self.assertAlmostEqual(calibrated_detection_confidence({"point_count":15},0,4),.325)
