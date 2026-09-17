@@ -33,6 +33,24 @@ class VoxelBackground:
         return dynamic
 
 
+def exclude_mapped_static(points,primitives,margin=.5):
+    """Reject returns inside the planner's known static map, never Gazebo truth."""
+    result=[]
+    for p in points:
+        occupied=False
+        for shape in primitives:
+            if not -margin<=p[2]<=shape["height"]+margin:continue
+            dx=abs(p[0]-shape["x"]);dy=abs(p[1]-shape["y"])
+            if shape["kind"]=="box":
+                occupied=dx<=shape["half_x"]+margin and dy<=shape["half_y"]+margin
+            elif shape["kind"]=="cylinder":
+                occupied=dx*dx+dy*dy<=(shape["radius"]+margin)**2
+            else:raise ValueError("unsupported static primitive")
+            if occupied:break
+        if not occupied:result.append(p)
+    return result
+
+
 def euclidean_clusters(points,tolerance=1.0,minimum_points=6,maximum_points=500):
     """Grid-accelerated connected components with a Euclidean radius gate."""
     points=finite_points(points);cell=max(0.05,float(tolerance));grid=defaultdict(list)
@@ -95,18 +113,23 @@ class DetectionAssociator:
         self.tracks={};self.sequence=0;self.frame=0
     def update(self,detections,stamp=None):
         self.frame+=1;stamp=float(self.frame*0.2 if stamp is None else stamp)
+        if self.maximum_track_age is not None:
+            for identity,track in list(self.tracks.items()):
+                if stamp-track["stamp"]>self.maximum_track_age:del self.tracks[identity]
         unmatched=set(self.tracks);assigned=[]
         for detection in detections:
             best=None;distance=self.maximum_distance
             for identity in unmatched:
                 track=self.tracks[identity];dt=max(0.0,stamp-track["stamp"]);velocity=track.get("velocity") or (0.0,0.0,0.0)
+                displacement=math.sqrt(sum((a-b)**2 for a,b in zip(detection["position"],track["position"])))
+                if dt>0.0 and displacement>self.maximum_speed*dt:continue
                 predicted=[p+v*dt for p,v in zip(track["position"],velocity)]
                 value=math.sqrt(sum((a-b)**2 for a,b in zip(detection["position"],predicted)))
                 if value<distance:best,distance=identity,value
             if best is None:
                 best="lidar_target_{}".format(self.sequence);self.sequence+=1
                 self.tracks[best]={"hits":0,"motion_hits":0,"misses":0,
-                    "position":detection["position"],"stamp":stamp,"velocity":None}
+                    "position":detection["position"],"stamp":stamp,"velocity":None,"confirmed":False,"history":deque(maxlen=max(6,self.confirmation_hits+2))}
             else:unmatched.remove(best)
             track=self.tracks[best];previous=track["position"];dt=stamp-track["stamp"]
             velocity=None
@@ -121,11 +144,33 @@ class DetectionAssociator:
                     consistent=cosine>=self.minimum_direction_cosine and acceleration<=self.maximum_acceleration
                 track["motion_hits"]=track["motion_hits"]+1 if consistent else 0
             track["hits"]+=1;track["misses"]=0;track["position"]=detection["position"];track["stamp"]=stamp
-            if velocity is not None:track["velocity"]=velocity
+            track["history"].append((stamp,list(detection["position"])))
+            if velocity is not None:
+                prior=track.get("velocity")
+                track["velocity"]=([.65*a+.35*b for a,b in zip(prior,velocity)]
+                                   if track["confirmed"] and prior is not None else velocity)
+            if track["hits"]>=self.confirmation_hits and track["motion_hits"]>=self.confirmation_hits-1:
+                track["confirmed"]=True
+            if not track["confirmed"] and len(track["history"])==track["history"].maxlen:
+                # Fit a whole short track instead of differentiating centroid
+                # noise twice. Reversals, static jitter and curved jumps fail
+                # the speed / residual gates without delaying real motion indefinitely.
+                samples=list(track["history"]);mean_t=sum(t for t,p in samples)/len(samples)
+                mean_p=[sum(p[a] for t,p in samples)/len(samples) for a in range(3)]
+                denom=sum((t-mean_t)**2 for t,p in samples)
+                if denom>1e-6 and samples[-1][0]-samples[0][0]>=.8:
+                    fitted=[sum((t-mean_t)*(p[a]-mean_p[a]) for t,p in samples)/denom for a in range(3)]
+                    speed=math.sqrt(sum(v*v for v in fitted))
+                    residual=max(math.sqrt(sum((p[a]-mean_p[a]-fitted[a]*(t-mean_t))**2 for a in range(3))) for t,p in samples)
+                    if self.minimum_speed<=speed<=self.maximum_speed and residual<=.35:
+                        track["confirmed"]=True;track["velocity"]=fitted
             output=dict(detection);output["id"]=best;output["confirmation_hits"]=track["hits"]
+            if track.get("velocity") is not None:output["velocity_hint"]=list(track["velocity"])
             output["motion_hits"]=track["motion_hits"]
             output["confidence"]=calibrated_detection_confidence(output,track["motion_hits"],self.confirmation_hits)
-            if track["hits"]>=self.confirmation_hits and track["motion_hits"]>=self.confirmation_hits-1:assigned.append(output)
+            # Confirmation belongs to the track lifetime, not each noisy frame.
+            # Association still requires bounded innovation, speed and age.
+            if track["confirmed"]:assigned.append(output)
         for identity in unmatched:
             track=self.tracks[identity];track["misses"]+=1;age=stamp-track["stamp"]
             expired=(age>self.maximum_track_age if self.maximum_track_age is not None else track["misses"]>self.maximum_misses)

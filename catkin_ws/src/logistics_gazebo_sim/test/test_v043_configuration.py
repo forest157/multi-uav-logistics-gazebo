@@ -22,7 +22,7 @@ class V043ConfigurationTest(unittest.TestCase):
             self.assertIn(field,recorder)
         player=Path(ROOT,"scripts","fleet_mission_player").read_text(encoding="utf-8")
         self.assertIn('get("PLANNER_PENDING")',player)
-        self.assertIn('"WAITING","action":"SLOW"',player)
+        self.assertIn('safety_context=context',player)
         operator=Path(ROOT,"src","logistics_gazebo_sim","operator_plugin.py").read_text(encoding="utf-8")
         self.assertIn("class RosUiBridge(QObject)",operator)
         self.assertIn("state_received.connect(self.state_cb)",operator)

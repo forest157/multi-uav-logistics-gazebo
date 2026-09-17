@@ -3,10 +3,83 @@ import unittest
 import numpy as np
 from logistics_gazebo_sim.local_avoidance import (
     CollectiveOffsetPlanner, Orca3DPlanner, DistributedMpcPlanner, OrcaCommandGate, orca_position_targets, available_local_planners,
-    create_local_planner)
+    create_local_planner, validate_orca_execution)
 from logistics_gazebo_sim.dynamic_obstacles import DynamicObstacleError
 
 class LocalAvoidanceTest(unittest.TestCase):
+    def test_complete_acceleration_ramp_is_validated_before_first_slew_step(self):
+        gate=OrcaCommandGate(1)
+        bird=dict(id="bird",position=[0,12,8],velocity=[0,-3,0],radius=.75,height=1.5)
+        context=self.execution_context(position=(-3,0,8),velocity=(1.4,0,0),obstacles=[bird])
+        plan=dict(viable=True,algorithm="orca3d",command_type="per_vehicle_velocity",
+                  contract_version="orca_velocity_v1",stamp=10.,valid_for_s=.6,
+                  constraints_satisfied=True,static_validation=dict(feasible=True),
+                  commands=[dict(vehicle_id="uav0",velocity=[2,0,.6],preferred_velocity=[1.4,0,0])])
+        result=gate.condition(plan,10.,.2,safety_context=context)
+        self.assertEqual(result,[(1.4,0.,0.)])
+        self.assertTrue(validate_orca_execution(gate.target_velocities,context,10.))
+        self.assertEqual(gate.target_velocities[0][2],0.)
+        advanced=gate.current(10.2)
+        self.assertAlmostEqual(advanced[0][0],1.6)
+        self.assertEqual(advanced[0][2],0.)
+
+    def test_gate_refreshes_cached_target_and_expires_fail_closed(self):
+        gate=OrcaCommandGate(1,timeout=.6)
+        context=self.execution_context(velocity=(0,0,0))
+        plan=dict(viable=True,algorithm="orca3d",command_type="per_vehicle_velocity",
+                  contract_version="orca_velocity_v1",stamp=10.,valid_for_s=.6,
+                  constraints_satisfied=True,static_validation=dict(feasible=True),
+                  commands=[dict(vehicle_id="uav0",velocity=[1,0,0],preferred_velocity=[0,0,0])])
+        gate.condition(plan,10.,.2,safety_context=context)
+        self.assertAlmostEqual(gate.current(10.2)[0][0],.2)
+        context["stamp"]=10.5
+        self.assertAlmostEqual(gate.refresh(context,10.5)[0][0],.5)
+        with self.assertRaisesRegex(DynamicObstacleError,"expired"):
+            gate.current(11.11)
+
+    def test_clear_recovery_allows_validated_vertical_return_to_route(self):
+        gate=OrcaCommandGate(1,max_climb_rate=.8)
+        context=self.execution_context(velocity=(0,0,0))
+        context["nominal_errors"]=[5.]
+        plan=dict(viable=False,algorithm="orca3d",command_type="per_vehicle_velocity",
+                  contract_version="orca_velocity_v1",stamp=10.,valid_for_s=.6,
+                  constraints_satisfied=False,static_validation=dict(feasible=False),
+                  commands=[dict(vehicle_id="uav0",velocity=[.2,.1,-2.],preferred_velocity=[.2,.1,-2.])])
+        gate.condition(plan,10.,.2,safety_context=context)
+        self.assertAlmostEqual(gate.target_velocities[0][2],-.8)
+
+    def execution_context(self,position=(0,0,8),velocity=(0,0,0),obstacles=None):
+        return dict(stamp=10.,positions=[position],velocities=[velocity],
+                    obstacles=obstacles or [],horizon=8.,control_delay=.6)
+
+    def test_execution_rejects_hold_in_incoming_bird_path(self):
+        bird=dict(id="bird",position=[0,12,8],velocity=[0,-3,0],radius=.75,height=1.5)
+        context=self.execution_context(obstacles=[bird])
+        self.assertFalse(validate_orca_execution([(0,0,0)],context,10.))
+        self.assertTrue(validate_orca_execution([(2,0,0)],context,10.))
+
+    def test_execution_accounts_for_control_delay(self):
+        bird=dict(id="bird",position=[0,4,8],velocity=[0,-3,0],radius=.75,height=1.5)
+        self.assertFalse(validate_orca_execution([(2,0,0)],self.execution_context(obstacles=[bird]),10.))
+
+    def test_execution_rejects_stale_context_and_pair_crossing(self):
+        context=self.execution_context()
+        with self.assertRaises(DynamicObstacleError):validate_orca_execution([(0,0,0)],context,11.)
+        context.update(positions=[[-4,0,8],[4,0,8]],velocities=[[1,0,0],[-1,0,0]])
+        self.assertFalse(validate_orca_execution([(1,0,0),(-1,0,0)],context,10.))
+
+    def test_gate_rechecks_filtered_command_without_mutating_on_rejection(self):
+        gate=OrcaCommandGate(1)
+        bird=dict(id="bird",position=[0,8,8],velocity=[0,-3,0],radius=.75,height=1.5)
+        plan=dict(viable=True,algorithm="orca3d",command_type="per_vehicle_velocity",
+                  contract_version="orca_velocity_v1",stamp=10.,valid_for_s=.6,
+                  constraints_satisfied=True,static_validation=dict(feasible=True),
+                  commands=[dict(vehicle_id="uav0",velocity=[2,0,0],preferred_velocity=[0,0,0])])
+        with self.assertRaisesRegex(DynamicObstacleError,"conditioned ORCA"):
+            gate.condition(plan,10.,.2,safety_context=self.execution_context(obstacles=[bird]))
+        self.assertIsNone(gate.current_velocities)
+        self.assertIsNone(gate.target_velocities)
+
     def paths(self,count=3):
         middle=(count-1)*0.5
         return [[[0.0,0.0,(i-middle)*4.0,8.0],[5.0,10.0,(i-middle)*4.0,8.0]]

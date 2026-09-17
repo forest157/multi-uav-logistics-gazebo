@@ -6,7 +6,13 @@
   <arg name="spawn_y" default="-40.0"/>
   <arg name="spawn_spacing_m" default="3.3"/>
   <arg name="gazebo_master_uri" default="http://127.0.0.1:11430"/>
+  <arg name="px4_root" default="$(env HOME)/PX4_Firmware"/>
   <env name="GAZEBO_MASTER_URI" value="$(arg gazebo_master_uri)"/>
+  <!-- Login-shell environment is not preserved across every Docker restart.
+       Make both PX4's Gazebo bridge and this workspace's plugins resolvable. -->
+  <env name="GAZEBO_PLUGIN_PATH" value="$(arg px4_root)/build/px4_sitl_default/build_gazebo:$(optenv GAZEBO_PLUGIN_PATH)"/>
+  <env name="LD_LIBRARY_PATH" value="$(arg px4_root)/build/px4_sitl_default/build_gazebo:$(optenv LD_LIBRARY_PATH)"/>
+  <env name="GAZEBO_MODEL_PATH" value="$(arg px4_root)/Tools/sitl_gazebo/models:$(optenv GAZEBO_MODEL_PATH)"/>
 
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
     <arg name="world_name" value="$(find logistics_gazebo_sim)/worlds/scene_$(arg scene_id).world"/>

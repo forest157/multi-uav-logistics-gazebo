@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Minimal single-vehicle ENU position controller for PX4 v1.13/MAVROS."""
 import rospy
+import copy
+import math
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool
-from mavros_msgs.msg import ExtendedState, ParamValue, State
+from mavros_msgs.msg import ExtendedState, ParamValue, State, PositionTarget
+from logistics_gazebo_sim.flight_setpoints import valid_setpoint, VELOCITY_MASK
 from mavros_msgs.srv import CommandBool, ParamSet, SetMode
 
 
@@ -14,6 +17,7 @@ class Controller:
         self.takeoff_authorized = False
         self.landed_state = ExtendedState.LANDED_STATE_UNDEFINED
         self.local_altitude = float("inf")
+        self.local_pose=None;self.raw_target=None;self.raw_seen=False;self.expired_hold=None
         self.target = PoseStamped()
         self.target.pose.position.x = rospy.get_param("~x", 0.0)
         self.target.pose.position.y = rospy.get_param("~y", 0.0)
@@ -21,17 +25,21 @@ class Controller:
         self.target.pose.orientation.w = 1.0
         rospy.Subscriber("mavros/state", State, self._state_cb, queue_size=1)
         rospy.Subscriber("target_pose", PoseStamped, self._target_cb, queue_size=1)
+        rospy.Subscriber("target_setpoint", PositionTarget, self._raw_cb, queue_size=1)
         rospy.Subscriber("/fleet/mission_complete", Bool, self._complete_cb, queue_size=1)
         rospy.Subscriber("/fleet/takeoff_authorized", Bool, self._authorization_cb, queue_size=1)
         rospy.Subscriber("mavros/extended_state", ExtendedState, self._extended_cb, queue_size=1)
         rospy.Subscriber("mavros/local_position/pose", PoseStamped, self._pose_cb, queue_size=1)
         self.publisher = rospy.Publisher("mavros/setpoint_position/local", PoseStamped, queue_size=10)
+        self.raw_publisher=rospy.Publisher("mavros/setpoint_raw/local",PositionTarget,queue_size=1)
         self.arm = rospy.ServiceProxy("mavros/cmd/arming", CommandBool)
         self.mode = rospy.ServiceProxy("mavros/set_mode", SetMode)
         self.param_set = rospy.ServiceProxy("mavros/param/set", ParamSet)
 
     def _pose_cb(self, msg):
-        self.local_altitude = msg.pose.position.z
+        p=msg.pose.position
+        if all(math.isfinite(v) for v in (p.x,p.y,p.z)):
+            self.local_altitude=p.z;self.local_pose=copy.deepcopy(msg.pose)
 
     def _extended_cb(self, msg):
         self.landed_state = msg.landed_state
@@ -43,9 +51,19 @@ class Controller:
         self.takeoff_authorized = msg.data
 
     def _target_cb(self, msg):
+        p=msg.pose.position
+        if not all(math.isfinite(v) for v in (p.x,p.y,p.z)):return
         self.target.pose = msg.pose
         if self.target.pose.orientation.w == 0.0 and self.target.pose.orientation.x == 0.0 and self.target.pose.orientation.y == 0.0 and self.target.pose.orientation.z == 0.0:
             self.target.pose.orientation.w = 1.0
+
+    def _raw_cb(self,msg):
+        self.raw_seen=True
+        if not valid_setpoint(msg,rospy.get_time()):
+            self.raw_target=None
+            return
+        if self.raw_target is not None and msg.header.stamp<=self.raw_target.header.stamp:return
+        self.raw_target=copy.deepcopy(msg);self.expired_hold=None
 
     def _configure_landing(self):
         try:
@@ -100,9 +118,19 @@ class Controller:
             rate.sleep()
 
     def _publish(self):
-        self.target.header.stamp = rospy.Time.now()
-        self.target.header.frame_id = "map"
-        self.publisher.publish(self.target)
+        now=rospy.Time.now();raw=self.raw_target
+        if raw is not None and valid_setpoint(raw,now.to_sec()) and not (self.mission_complete and raw.type_mask==VELOCITY_MASK):
+            message=copy.deepcopy(raw);message.header.stamp=now
+            self.raw_publisher.publish(message)
+            return
+        target=copy.deepcopy(self.target)
+        if self.raw_seen:
+            # Stop a timed-out velocity command at the last valid local pose.
+            # Never silently resume an old nominal target after raw transport loss.
+            if self.expired_hold is None:self.expired_hold=copy.deepcopy(self.local_pose or self.target.pose)
+            target.pose=self.expired_hold
+        target.header.stamp=now;target.header.frame_id="map"
+        self.publisher.publish(target)
 
 
 if __name__ == "__main__":

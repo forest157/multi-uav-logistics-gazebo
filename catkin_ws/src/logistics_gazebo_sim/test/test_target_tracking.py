@@ -4,6 +4,19 @@ from logistics_gazebo_sim.target_tracking import AlphaBetaTracker,TrackingError,
 
 
 class TargetTrackingTest(unittest.TestCase):
+    def test_confirmed_lidar_motion_seeds_initial_velocity(self):
+        from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator
+        associator=DetectionAssociator(confirmation_hits=4)
+        for i in range(4):
+            detections=associator.update([dict(position=[0,12-.6*i,8])],1+.2*i)
+        payload=validate_detection_payload(dict(stamp=1.6,detections=detections))
+        track=AlphaBetaTracker().update(payload["stamp"],payload["detections"])[0]
+        self.assertAlmostEqual(track["velocity"][1],-3.)
+
+    def test_invalid_velocity_hint_is_rejected(self):
+        with self.assertRaises(TrackingError):
+            validate_detection_payload(dict(stamp=1.,detections=[dict(id="bird",position=[0,0,8],velocity_hint=[0,float("nan"),0])]))
+
     def test_detection_validation_rejects_bad_xyz(self):
         with self.assertRaises(TrackingError):validate_detection_payload({"stamp":1,"detections":[{"id":"bird","position":[1,2]}]})
 

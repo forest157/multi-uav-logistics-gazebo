@@ -16,6 +16,37 @@ class DynamicObstacleError(ValueError):
     pass
 
 
+class ObstacleMemory:
+    """Bounded sensor-only prediction across a track disappearing from the feed."""
+    def __init__(self,maximum_age=4.0):
+        self.maximum_age=float(maximum_age);self.entries={};self.stamp=None
+
+    def update(self,obstacles,stamp):
+        stamp=float(stamp)
+        if not math.isfinite(stamp):raise DynamicObstacleError("obstacle memory stamp must be finite")
+        if self.stamp is not None and stamp<self.stamp:self.entries.clear()
+        self.stamp=stamp
+        for raw in obstacles:
+            item=validate_obstacle(raw)
+            age=float(raw.get("occluded_for_s",0.0))
+            if not math.isfinite(age) or age<0.:raise DynamicObstacleError("invalid obstacle occlusion age")
+            value=dict(raw,position=item["position"].tolist(),velocity=item["velocity"].tolist())
+            self.entries[item["id"]]=(stamp,stamp-age,value)
+        result=[]
+        for identity,(updated,observed,item) in list(self.entries.items()):
+            age=stamp-observed;missing=stamp-updated
+            if age>self.maximum_age:
+                del self.entries[identity];continue
+            value=dict(item)
+            if missing>0.:
+                value.update(position=[p+v*missing for p,v in zip(item["position"],item["velocity"])],
+                             radius=float(item["radius"])+.25*missing,
+                             height=float(item["height"])+.5*missing,
+                             observed=False,occluded_for_s=age,remembered=True)
+            result.append(value)
+        return result
+
+
 def validate_obstacle(value):
     required = ("id", "position", "velocity", "radius", "height")
     missing = [key for key in required if key not in value]

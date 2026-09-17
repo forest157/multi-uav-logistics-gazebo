@@ -6,10 +6,23 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class LidarModelTest(unittest.TestCase):
+    def test_scan_publisher_uses_completed_measurement_and_exact_sample_angles(self):
+        model=(ROOT/"models"/"iris_3d_lidar"/"iris_3d_lidar.sdf.jinja").read_text()
+        source=(ROOT/"src"/"logistics_lidar_plugin.cpp").read_text()
+        self.assertIn("liblogistics_lidar_plugin.so",model)
+        self.assertIn("ConnectUpdated",source)
+        self.assertIn("LastMeasurementTime()",source)
+        self.assertIn("yaw0+i*yaw_step",source)
+        self.assertIn("pitch0+j*pitch_step",source)
+        self.assertNotIn("LastUpdateTime()",source)
+        self.assertNotIn("WorldPose()",source)
+        self.assertNotIn("ros::Time::now()",source)
+
     def test_single_multilayer_sensor_is_namespaced(self):
         model=(ROOT/"models"/"iris_3d_lidar"/"iris_3d_lidar.sdf.jinja").read_text(encoding="utf-8")
         self.assertEqual(model.count("sensor name='lidar_3d'"),1)
-        self.assertIn("<vertical><samples>16</samples>",model)
+        self.assertIn("<vertical><samples>32</samples>",model)
+        self.assertIn("<horizontal><samples>720</samples>",model)
         self.assertIn("<max>35.0</max>",model)
         self.assertIn("uav{{ mavlink_id | int - 1 }}",model)
 
