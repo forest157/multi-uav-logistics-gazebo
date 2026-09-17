@@ -16,7 +16,10 @@ class Capture:
         self.targets={};self.velocities={};self.flight_states={};self.latest_tracks={};self.truth_stamp=None;self.raw_setpoints={}
         for i in range(3):
             rospy.Subscriber('/uav%d/mavros/local_position/pose'%i,PoseStamped,self.pose,i,queue_size=1)
-            rospy.Subscriber('/uav%d/mavros/setpoint_position/local'%i,PoseStamped,self.target,i,queue_size=1)
+            # Mission target is the authoritative nominal altitude. MAVROS may
+            # execute it through raw velocity setpoints, leaving the position
+            # setpoint topic unused during otherwise normal flight.
+            rospy.Subscriber('/uav%d/target_pose'%i,PoseStamped,self.target,i,queue_size=1)
             rospy.Subscriber('/uav%d/mavros/local_position/velocity_local'%i,TwistStamped,self.velocity,i,queue_size=1)
             rospy.Subscriber('/uav%d/mavros/state'%i,State,self.flight_state,i,queue_size=1)
             rospy.Subscriber('/uav%d/mavros/setpoint_raw/local'%i,PositionTarget,self.raw_setpoint,i,queue_size=1)

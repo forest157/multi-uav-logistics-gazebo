@@ -17,3 +17,9 @@ class StaticReturnTest(unittest.TestCase):
     def test_no_map_does_not_filter_unknown_environment(self):
         points=[(1,2,3)]
         self.assertEqual(exclude_mapped_static(points,[]),points)
+
+    def test_configured_map_margin_removes_corner_parallax_fragment(self):
+        shape=dict(kind="box",x=18.,y=-15.,half_x=4.,half_y=7.,height=22.)
+        fragment=(13.59,-23.06,7.52)
+        self.assertEqual(exclude_mapped_static([fragment],[shape],1.5),[])
+        self.assertEqual(exclude_mapped_static([fragment],[shape],.5),[fragment])

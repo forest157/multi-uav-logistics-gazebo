@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-17",
+  "branch": "feature/v0511-real-scale-worlds",
+  "scenario": "scene_0, three UAVs, physical lidar, no birds, ORCA limited execution enabled",
+  "source_capture": "/tmp/no_bird_sep17_r2.jsonl",
+  "source_capture_committed": false,
+  "samples": 4983,
+  "valid_truth_samples": 4983,
+  "mission_elapsed_s": 267.5,
+  "bird_truth_samples": 0,
+  "frames_with_perception_tracks": 0,
+  "maximum_perception_track_count": 0,
+  "active_avoidance_samples": 0,
+  "minimum_fleet_separation_m": 3.2115764413976273,
+  "maximum_estimate_error_m": 0.52092342634292,
+  "maximum_settled_vertical_tracking_error_m": 0.4982093310550191,
+  "settled_vertical_tracking_samples": 14056,
+  "complete": true,
+  "disarmed": true,
+  "passed": true,
+  "criteria": {
+    "minimum_fleet_separation_m": 3.0,
+    "maximum_estimate_error_m": 1.0,
+    "maximum_settled_vertical_tracking_error_m": 1.0,
+    "truth_max_receipt_age_s": 0.2,
+    "unexpected_perception_tracks": 0,
+    "unexpected_flight_avoidance_actions": 0
+  },
+  "notes": "SLOW/HOLD observed after COMPLETE came from perception timeout after landing and is excluded from flight-stage takeover counts.",
+  "scope": "Conservative sampled truth and level-flight altitude tracking; not a continuous contact-sensor proof or a substitute for dropout, head-on, formation and outdoor-world acceptance."
+}

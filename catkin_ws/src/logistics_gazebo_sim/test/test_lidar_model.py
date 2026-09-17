@@ -36,5 +36,6 @@ class LidarModelTest(unittest.TestCase):
         launch=(ROOT/"launch"/"three_uav_mission.launch").read_text(encoding="utf-8")
         self.assertIn('<arg name="lidar_cloud_aggregation" default="true"/>',launch)
         self.assertIn('<node if="$(arg lidar_cloud_aggregation)"',launch)
+        self.assertIn('<param name="static_map_margin_m" value="1.5"/>',launch)
 
 if __name__=="__main__":unittest.main()
