@@ -57,8 +57,8 @@ roslaunch logistics_gazebo_sim operator_station.launch
 
 1. 单鸟横穿物理雷达 + ORCA limited 完整任务已通过：鸟机保守包络最小净空 2.5539 m、机间最小距离 3.1795 m、最大估计误差 0.5460 m，任务完成并解除武装。摘要见 `v0511_real_scale_worlds/ORCA_LIDAR_FULL_MISSION_SEP17.json`。
 2. 纯无鸟完整任务已通过：4983/4983 有效样本，感知目标 0、飞行阶段避障接管 0、机间最小距离 3.2116 m、收敛后最大高度误差 0.4982 m。摘要见 `v0511_real_scale_worlds/NO_BIRD_LIDAR_FULL_MISSION_SEP17.json`。
-3. 下一步做雷达/跟踪断流与恢复完整回归，必须验证新鲜空列表仍 SAFE、真正断流才 SLOW/HOLD、恢复后无旧目标跳变。
-4. 然后做迎面动态障碍和整队动态避障回归，再完成至少一个室外世界的完整投递返航及 RTF/CPU/RSS 预算。
+3. 雷达断流恢复完整任务已通过：停止聚合器后按顺序进入 STALE/SLOW 和 STALE/HOLD，重启后经 SAFE/HOLD 释放保护恢复 SAFE/NORMAL；虚假目标和非预期接管均为 0，最终 COMPLETE/解除武装。摘要见 `v0511_real_scale_worlds/LIDAR_DROPOUT_RECOVERY_FULL_MISSION_SEP18.json`。
+4. 下一步做迎面动态障碍和整队动态避障回归，再完成至少一个室外世界的完整投递返航及 RTF/CPU/RSS 预算。
 5. 矩阵完成后才更新 0.5 总验收、合并 `main` 和发布 `v0.5.11`/`v0.5.12`；不要提前声明 0.5 完成。
 
 ## 已知边界

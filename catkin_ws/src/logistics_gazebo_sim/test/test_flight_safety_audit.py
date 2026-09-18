@@ -18,7 +18,7 @@ class FlightAuditTest(unittest.TestCase):
         targets={str(i):[10.,0.,0.,.1] for i in range(3)}
         return dict(stamp=10.,truth_receipt_stamp=10.,truth_evaluation_only=fleet,poses=poses,
                     targets=targets,
-                    mission=dict(state="COMPLETE",dynamic_action="NORMAL"),
+                    mission=dict(state="COMPLETE",dynamic_action="NORMAL",dynamic_risk="SAFE"),
                     flight_states={str(i):dict(armed=False) for i in range(3)})
 
     def test_complete_clear_flight_passes(self):
@@ -69,3 +69,24 @@ class FlightAuditTest(unittest.TestCase):
         row=self.row();del row["truth_evaluation_only"]["bird_trial_0"]
         report=audit.analyze([row])
         self.assertIn("bird_truth_missing",report["failure_reasons"])
+
+    def test_expected_dropout_requires_slow_hold_and_safe_recovery(self):
+        final=self.row();del final["truth_evaluation_only"]["bird_trial_0"]
+        rows=[]
+        for action,risk in (("NORMAL","SAFE"),("SLOW","STALE"),("HOLD","STALE"),
+                            ("HOLD","SAFE"),("NORMAL","SAFE")):
+            row=copy.deepcopy(final);row["mission"].update(state="RUNNING",
+                dynamic_action=action,dynamic_risk=risk);rows.append(row)
+        rows.append(final)
+        report=audit.analyze(rows,require_bird=False,expect_dropout_recovery=True)
+        self.assertTrue(report["passed"])
+        self.assertTrue(report["dropout_recovered"])
+        self.assertEqual(report["dropout_slow_samples"],1)
+        self.assertEqual(report["dropout_hold_samples"],1)
+        self.assertEqual(report["dropout_release_guard_samples"],1)
+
+    def test_expected_dropout_rejects_missing_recovery(self):
+        row=self.row();del row["truth_evaluation_only"]["bird_trial_0"]
+        row["mission"].update(state="RUNNING",dynamic_action="HOLD",dynamic_risk="STALE")
+        report=audit.analyze([row],require_bird=False,expect_dropout_recovery=True)
+        self.assertIn("dropout_recovery_missing",report["failure_reasons"])

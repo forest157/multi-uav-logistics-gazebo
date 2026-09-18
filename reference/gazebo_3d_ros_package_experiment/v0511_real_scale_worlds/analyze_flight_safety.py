@@ -7,16 +7,20 @@ import math
 
 
 def analyze(rows, spawn_x=-40., spawn_y=-40., spacing=3.3, vehicle_radius=1.2,
-            bird_radius=.75, require_bird=True):
+            bird_radius=.75, require_bird=True, expect_dropout_recovery=False):
     metrics=dict(samples=0,valid_truth_samples=0,minimum_bird_envelope_clearance_m=None,
                  minimum_fleet_separation_m=None,maximum_estimate_error_m=None,
                  maximum_settled_vertical_tracking_error_m=None,
                  settled_vertical_tracking_samples=0,
                  closest_bird_event=None,bird_truth_samples=0,
                  frames_with_perception_tracks=0,maximum_perception_track_count=0,
-                 active_avoidance_samples=0,complete=False,disarmed=False)
+                 active_avoidance_samples=0,unexpected_avoidance_samples=0,
+                 dropout_slow_samples=0,dropout_hold_samples=0,
+                 dropout_release_guard_samples=0,
+                 dropout_recovered=False,complete=False,disarmed=False)
     actions=collections.Counter();previous=None;transitions=0
     vertical_states={str(i):dict(target=None,settled=False) for i in range(3)}
+    dropout_phase=0
     for row in rows:
         metrics["samples"]+=1
         mission=row.get("mission",{});action=mission.get("dynamic_action")
@@ -28,9 +32,27 @@ def analyze(rows, spawn_x=-40., spawn_y=-40., spacing=3.3, vehicle_radius=1.2,
         if track_count:metrics["frames_with_perception_tracks"]+=1
         metrics["maximum_perception_track_count"]=max(
             metrics["maximum_perception_track_count"],track_count)
-        if mission.get("state") not in (None,"INITIALIZING","READY","COMPLETE") and action in (
-                "SLOW","ORCA","HOLD","AVOID"):
-            metrics["active_avoidance_samples"]+=1
+        flight_active=mission.get("state") not in (None,"INITIALIZING","READY","COMPLETE")
+        if flight_active:
+            risk=mission.get("dynamic_risk")
+            if action in ("SLOW","ORCA","HOLD","AVOID"):
+                metrics["active_avoidance_samples"]+=1
+                stale_response=risk=="STALE" and action in ("SLOW","HOLD")
+                release_guard=(dropout_phase in (2,3) and risk=="SAFE"
+                               and action in ("SLOW","HOLD"))
+                expected=expect_dropout_recovery and (stale_response or release_guard)
+                if not expected:metrics["unexpected_avoidance_samples"]+=1
+                if expect_dropout_recovery and release_guard:
+                    metrics["dropout_release_guard_samples"]+=1
+            if expect_dropout_recovery:
+                if dropout_phase==0 and risk=="SAFE" and action=="NORMAL":dropout_phase=1
+                elif dropout_phase>=1 and risk=="STALE" and action=="SLOW":
+                    metrics["dropout_slow_samples"]+=1
+                    if dropout_phase==1:dropout_phase=2
+                elif dropout_phase>=1 and risk=="STALE" and action=="HOLD":
+                    metrics["dropout_hold_samples"]+=1
+                    if dropout_phase==2:dropout_phase=3
+                elif dropout_phase==3 and risk=="SAFE" and action=="NORMAL":dropout_phase=4
         metrics["complete"]=mission.get("state")=="COMPLETE"
         states=row.get("flight_states",{})
         metrics["disarmed"]=len(states)==3 and all(not s["armed"] for s in states.values())
@@ -72,6 +94,7 @@ def analyze(rows, spawn_x=-40., spawn_y=-40., spacing=3.3, vehicle_radius=1.2,
                     metrics["minimum_bird_envelope_clearance_m"]=d
                     metrics["closest_bird_event"]=dict(stamp=stamp,vehicle=i,bird=name,action=action)
     metrics["actions"]=dict(actions);metrics["action_transitions"]=transitions
+    metrics["dropout_recovered"]=dropout_phase==4
     metrics["criteria"]=dict(minimum_fleet_separation_m=3.,minimum_bird_envelope_clearance_m=0.,
                              maximum_estimate_error_m=1.,maximum_settled_vertical_tracking_error_m=1.,
                              truth_max_receipt_age_s=.2)
@@ -86,7 +109,12 @@ def analyze(rows, spawn_x=-40., spawn_y=-40., spacing=3.3, vehicle_radius=1.2,
     if not require_bird:
         if metrics["bird_truth_samples"]:reasons.append("unexpected_bird_truth")
         if metrics["frames_with_perception_tracks"]:reasons.append("unexpected_perception_tracks")
-        if metrics["active_avoidance_samples"]:reasons.append("unexpected_avoidance_action")
+        if expect_dropout_recovery:
+            if metrics["unexpected_avoidance_samples"]:reasons.append("unexpected_avoidance_action")
+            if not metrics["dropout_slow_samples"]:reasons.append("dropout_slow_missing")
+            if not metrics["dropout_hold_samples"]:reasons.append("dropout_hold_missing")
+            if not metrics["dropout_recovered"]:reasons.append("dropout_recovery_missing")
+        elif metrics["active_avoidance_samples"]:reasons.append("unexpected_avoidance_action")
         if metrics["maximum_settled_vertical_tracking_error_m"] is None:
             reasons.append("vertical_tracking_missing")
         elif metrics["maximum_settled_vertical_tracking_error_m"]>1.:
@@ -101,10 +129,15 @@ def analyze(rows, spawn_x=-40., spawn_y=-40., spacing=3.3, vehicle_radius=1.2,
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument("capture")
-    parser.add_argument("--allow-no-birds",action="store_true",
-                        help="audit a declared no-bird scenario and reject any tracks or avoidance")
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument("--allow-no-birds",action="store_true",
+                      help="audit a declared no-bird scenario and reject any tracks or avoidance")
+    mode.add_argument("--expect-dropout-recovery",action="store_true",
+                      help="require SAFE/NORMAL -> STALE/SLOW -> STALE/HOLD -> SAFE/NORMAL")
     args=parser.parse_args()
     with open(args.capture) as stream:report=analyze(
-        (json.loads(line) for line in stream),require_bird=not args.allow_no_birds)
+        (json.loads(line) for line in stream),
+        require_bird=not (args.allow_no_birds or args.expect_dropout_recovery),
+        expect_dropout_recovery=args.expect_dropout_recovery)
     print(json.dumps(report,indent=2))
     raise SystemExit(0 if report["passed"] else 1)
