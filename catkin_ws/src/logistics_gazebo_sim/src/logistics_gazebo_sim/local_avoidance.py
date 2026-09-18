@@ -1,5 +1,6 @@
 """Pluggable local avoidance algorithms for scalable 3D fleets."""
 import math
+import heapq
 import multiprocessing as mp
 import threading
 import time
@@ -103,8 +104,61 @@ class OrcaCommandGate:
         selected=next((values for values in alternatives
                        if validate_orca_execution(values,context,now,self.max_acceleration)),None)
         if selected is None:
+            selected=self._independent_emergency_target(
+                horizontal_desired,context,now)
+        if selected is None:
             raise DynamicObstacleError("conditioned ORCA trajectory is unsafe")
         return [np.asarray(value,dtype=float) for value in selected]
+    def _independent_emergency_target(self, desired, context, now):
+        """Find a validated per-vehicle horizontal escape when a common one cannot.
+
+        A crossing obstacle can threaten successive members of a formation, so
+        forcing every aircraft to use the same fallback velocity may have no
+        solution even though a safe split maneuver exists. Each candidate is
+        first checked for that aircraft, then complete combinations are checked
+        for fleet separation and static-map clearance. The bounded best-first
+        search keeps this exceptional path deterministic and finite.
+        """
+        if self.vehicle_count<=1:return None
+        positions=context.get("positions",[]);measured=context.get("velocities",[])
+        if len(positions)!=self.vehicle_count or len(measured)!=self.vehicle_count:
+            raise DynamicObstacleError("ORCA execution context count mismatch")
+        directions=[np.asarray([math.cos(angle),math.sin(angle),0.],dtype=float)
+                    for angle in np.linspace(0.,2.*math.pi,72,endpoint=False)]
+        pools=[]
+        for index,target in enumerate(desired):
+            subset=dict(context,positions=[positions[index]],
+                        velocities=[measured[index]])
+            raw=[np.asarray(target,dtype=float)]+[
+                direction*self.max_speed for direction in directions]
+            unique=[];seen=set()
+            for value in raw:
+                key=tuple(round(float(axis),6) for axis in value)
+                if key in seen:continue
+                seen.add(key)
+                if validate_orca_execution([value],subset,now,
+                                           self.max_acceleration):
+                    unique.append(value)
+            if not unique:return None
+            unique.sort(key=lambda value:float(np.sum((value-target)**2)))
+            pools.append(unique)
+        start=tuple(0 for _ in pools);queue=[(0.0,start)];visited={start}
+        checks=0
+        while queue and checks<512:
+            _score,indices=heapq.heappop(queue)
+            values=[pools[i][index] for i,index in enumerate(indices)]
+            checks+=1
+            if validate_orca_execution(values,context,now,self.max_acceleration):
+                return values
+            for axis in range(len(indices)):
+                if indices[axis]+1>=len(pools[axis]):continue
+                updated=list(indices);updated[axis]+=1;updated=tuple(updated)
+                if updated in visited:continue
+                visited.add(updated)
+                score=sum(float(np.sum((pools[i][index]-desired[i])**2))
+                          for i,index in enumerate(updated))
+                heapq.heappush(queue,(score,updated))
+        return None
     def _emit_locked(self, now):
         now=float(now)
         if self.current_velocities is None or self.target_velocities is None:
@@ -210,13 +264,15 @@ def validate_orca_execution(velocities, context, now, max_acceleration=1.0):
         start=relative[:-1];delta=np.diff(relative,axis=0)
         fraction=np.clip(-np.sum(start*delta,axis=1)/np.maximum(1e-12,np.sum(delta*delta,axis=1)),0.,1.)
         return float(np.min(np.linalg.norm(start+fraction[:,None]*delta,axis=1)))
-    # Additional 0.1 m accounts conservatively for acceleration curvature within a step.
+    required_clearance=float(context.get("required_clearance",.1))
+    if not math.isfinite(required_clearance) or required_clearance<0.0:
+        raise DynamicObstacleError("invalid ORCA required clearance")
     for i in range(len(commands)):
         for j in range(i):
             if closest(path[:,i]-path[:,j])<float(context.get("minimum_separation",3.0))+0.1:return False
         for obstacle in obstacles:
             future=obstacle["position"]+(times+age)[:,None]*obstacle["velocity"]
-            required=1.2+max(obstacle["radius"],0.5*obstacle["height"])+0.5+0.1
+            required=1.2+max(obstacle["radius"],0.5*obstacle["height"])+0.5+required_clearance
             if closest(path[:,i]-future)<required:return False
     scene=context.get("scene_id")
     if scene is not None:

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from pathlib import Path
 import unittest
 import numpy as np
 from logistics_gazebo_sim.local_avoidance import (
@@ -7,6 +8,11 @@ from logistics_gazebo_sim.local_avoidance import (
 from logistics_gazebo_sim.dynamic_obstacles import DynamicObstacleError
 
 class LocalAvoidanceTest(unittest.TestCase):
+    def test_risk_monitor_forwards_required_clearance_to_planner_and_gate(self):
+        source=(Path(__file__).resolve().parents[1]/"scripts"/"dynamic_risk_monitor").read_text()
+        self.assertIn('"required_clearance":self.orca_required_clearance',source)
+        self.assertIn("required_clearance=self.orca_required_clearance",source)
+
     def test_complete_acceleration_ramp_is_validated_before_first_slew_step(self):
         gate=OrcaCommandGate(1)
         bird=dict(id="bird",position=[0,12,8],velocity=[0,-3,0],radius=.75,height=1.5)
@@ -62,6 +68,16 @@ class LocalAvoidanceTest(unittest.TestCase):
         bird=dict(id="bird",position=[0,4,8],velocity=[0,-3,0],radius=.75,height=1.5)
         self.assertFalse(validate_orca_execution([(2,0,0)],self.execution_context(obstacles=[bird]),10.))
 
+    def test_execution_uses_configured_dynamic_clearance(self):
+        bird=dict(id="bird",position=[2.7,0,8],velocity=[0,0,0],radius=.75,height=.8)
+        context=self.execution_context(obstacles=[bird])
+        self.assertTrue(validate_orca_execution([(0,0,0)],context,10.))
+        context["required_clearance"]=.5
+        self.assertFalse(validate_orca_execution([(0,0,0)],context,10.))
+        context["required_clearance"]=-.1
+        with self.assertRaisesRegex(DynamicObstacleError,"required clearance"):
+            validate_orca_execution([(0,0,0)],context,10.)
+
     def test_execution_rejects_stale_context_and_pair_crossing(self):
         context=self.execution_context()
         with self.assertRaises(DynamicObstacleError):validate_orca_execution([(0,0,0)],context,11.)
@@ -79,6 +95,23 @@ class LocalAvoidanceTest(unittest.TestCase):
             gate.condition(plan,10.,.2,safety_context=self.execution_context(obstacles=[bird]))
         self.assertIsNone(gate.current_velocities)
         self.assertIsNone(gate.target_velocities)
+
+    def test_gate_finds_split_horizontal_escape_for_crossing_fleet_threat(self):
+        gate=OrcaCommandGate(3)
+        context=dict(stamp=10.,
+            positions=[[-20.6039,-18.3025,16.8675],
+                       [-17.6279,-12.3581,16.8797],
+                       [-14.5739,-18.3442,16.8472]],
+            velocities=[[-.5516,.036,0.],[-.5846,.0011,0.],[-.4311,.0425,0.]],
+            obstacles=[dict(id="bird",position=[-12.2499,-6.6273,16.1953],
+                velocity=[-2.1975,-2.0545,.101],radius=.794,height=1.407)],
+            horizon=8.,control_delay=.6,minimum_separation=3.,
+            required_clearance=.5,scene_id=0)
+        desired=[np.zeros(3) for _ in range(3)]
+        selected=gate._safe_target(desired,context,10.)
+        self.assertTrue(validate_orca_execution(selected,context,10.))
+        self.assertTrue(all(value[2]==0. for value in selected))
+        self.assertFalse(np.allclose(selected[0],selected[1]))
 
     def paths(self,count=3):
         middle=(count-1)*0.5

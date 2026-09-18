@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
+import math
+from pathlib import Path
 import unittest
 
 import numpy as np
+import yaml
 
 from logistics_gazebo_sim.dynamic_obstacles import (
     DynamicObstacleError, DynamicSafetyResponse, RiskLevelHysteresis, AvoidanceExecution, assess_fleet_separation, assess_timed_path, braking_ttc_threshold, interpolate_timed_path,
@@ -9,6 +12,19 @@ from logistics_gazebo_sim.dynamic_obstacles import (
 
 
 class DynamicObstacleTest(unittest.TestCase):
+    def test_head_on_scenario_targets_outbound_middle_vehicle(self):
+        path=Path(__file__).resolve().parents[1]/"config"/"dynamic_obstacles_head_on.yaml"
+        with path.open(encoding="utf-8") as stream:item=yaml.safe_load(stream)["obstacles"][0]
+        start=np.asarray(item["start"],dtype=float);end=np.asarray(item["end"],dtype=float)
+        distance=float(np.linalg.norm(end-start));leg=distance/float(item["speed_mps"])
+        elapsed=67.3;phase=(elapsed+float(item["phase_s"]))%(2.0*leg)
+        self.assertLess(phase,leg)
+        position=start+(end-start)*(phase/leg)
+        velocity=(end-start)/distance*float(item["speed_mps"])
+        np.testing.assert_allclose(position[:2],[-13.4,-6.9],atol=.12)
+        self.assertLess(velocity[0],-2.0);self.assertLess(velocity[1],-2.0)
+        self.assertAlmostEqual(math.hypot(*velocity[:2]),3.0,places=6)
+
     def test_empty_but_fresh_obstacle_feed_is_not_stale(self):
         self.assertEqual(obstacle_feed_state(10.0,10.5),"FRESH")
         self.assertEqual(obstacle_feed_state(None,10.5),"STALE")

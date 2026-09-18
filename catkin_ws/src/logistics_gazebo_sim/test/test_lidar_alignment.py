@@ -48,6 +48,19 @@ class LidarAlignmentTest(unittest.TestCase):
         self.assertAlmostEqual(points[0][0],10)
         self.assertAlmostEqual(points[0][2],8.18,places=5)
         self.assertEqual(cloud.header.stamp,scan.header.stamp)
+    def test_malformed_teardown_return_does_not_kill_aggregation(self):
+        module=importlib.machinery.SourceFileLoader('lidar_teardown_test',str(Path(__file__).resolve().parents[1]/'scripts/lidar_cloud_aggregator')).load_module()
+        node=module.LidarCloudAggregator.__new__(module.LidarCloudAggregator)
+        pose=Pose();pose.position.z=8;pose.orientation.w=1
+        scan=PointCloud();scan.header.stamp=rospy.Time.from_sec(10)
+        scan.points=[Mock(x='retired',y=0,z=0),Point32(9,0,0)]
+        node.poses=[[(10,pose)]];node.clouds=[scan];node.consumed=[0.]
+        node.origins=[(0,0)];node.publisher=Mock()
+        with patch.object(rospy.Time,'now',return_value=rospy.Time.from_sec(10.1)):
+            node.publish_locked()
+        cloud=node.publisher.publish.call_args[0][0]
+        points=list(point_cloud2.read_points(cloud,field_names=('x','y','z')))
+        self.assertEqual(len(points),1)
     def test_no_echo_sphere_is_not_an_obstacle(self):
         for p in [(35.,0.,0.),(0.,-35.,0.),(21.,28.,0.),(0.,0.,34.999999)]:
             self.assertFalse(valid_return(p))

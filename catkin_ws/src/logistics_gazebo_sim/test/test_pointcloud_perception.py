@@ -30,6 +30,8 @@ class PointCloudPerceptionTest(unittest.TestCase):
 
     def test_vehicle_exclusion(self):
         self.assertEqual(exclude_near_vehicles([(0,0,0),(3,0,0)],[(0,0,0)],1.0),[(3.0,0.0,0.0)])
+        # Include rotor-tip echoes in the peer-body mask.
+        self.assertEqual(exclude_near_vehicles([(1.4,0,0),(1.9,0,0)],[(0,0,0)],1.8),[(1.9,0.0,0.0)])
     def test_static_voxel_becomes_background(self):
         model=VoxelBackground(voxel_size=1,background_hits=2)
         self.assertEqual(len(model.update([(2,2,2)])),1);self.assertEqual(len(model.update([(2,2,2)])),1)

@@ -24,6 +24,8 @@ class LidarCloudAggregator:
         self.origins=[(sx+(i-middle)*spacing,sy) for i in range(self.count)]
         self.poses=[deque(maxlen=100) for _ in range(self.count)];self.clouds=[None]*self.count
         self.consumed=[0.0]*self.count;self.lock=RLock()
+        self.vehicle_exclusion_radius=float(rospy.get_param("~vehicle_exclusion_radius_m",1.8))
+        if self.vehicle_exclusion_radius<=0.0:raise ValueError("vehicle exclusion radius must be positive")
         self.publisher=rospy.Publisher("/perception/lidar_points",PointCloud2,queue_size=1)
         for index in range(self.count):
             rospy.Subscriber("/uav{}/mavros/local_position/pose".format(index),PoseStamped,self.pose_cb,index,queue_size=1)
@@ -66,10 +68,20 @@ class LidarCloudAggregator:
                                     body.position.y+self.origins[peer][1],body.position.z))
             scan_points=[]
             for raw in item.points:
-                if not valid_return((raw.x,raw.y,raw.z)):continue
-                x,y,z=rotate((raw.x,raw.y,raw.z+0.18),quaternion)
-                scan_points.append((x+pose.position.x+origin[0],y+pose.position.y+origin[1],z+pose.position.z))
-            points.extend(exclude_near_vehicles(scan_points,centers,1.0))
+                try:
+                    local=(float(raw.x),float(raw.y),float(raw.z))
+                    if not valid_return(local):continue
+                    x,y,z=rotate((local[0],local[1],local[2]+0.18),quaternion)
+                    scan_points.append((x+float(pose.position.x)+origin[0],
+                                        y+float(pose.position.y)+origin[1],
+                                        z+float(pose.position.z)))
+                except (AttributeError,TypeError,ValueError):
+                    # Gazebo can retire a PointCloud callback concurrently with
+                    # vehicle teardown. One malformed return must not kill the
+                    # timer thread and make the obstacle feed stale.
+                    rospy.logwarn_throttle(2.0,"discarding malformed lidar return")
+            points.extend(exclude_near_vehicles(
+                scan_points,centers,getattr(self,"vehicle_exclusion_radius",1.8)))
         for index,stamp,pose in matched:self.consumed[index]=stamp
         stamp=max(s for i,s,p in matched)
         if stamp <= getattr(self,'last_stamp',0.0):return

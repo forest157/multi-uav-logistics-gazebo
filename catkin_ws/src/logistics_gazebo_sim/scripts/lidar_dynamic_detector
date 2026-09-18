@@ -23,6 +23,8 @@ class LidarDynamicDetector:
         self.static_primitives=[] if scene is None else obstacle_primitives(SCENES[int(scene)])
         self.static_margin=float(rospy.get_param("~static_map_margin_m",1.5))
         if self.static_margin<0.0:raise ValueError("static map margin must be non-negative")
+        self.vehicle_exclusion_radius=float(rospy.get_param("~vehicle_exclusion_radius_m",1.8))
+        if self.vehicle_exclusion_radius<=0.0:raise ValueError("vehicle exclusion radius must be positive")
         self.tolerance=float(rospy.get_param("~cluster_tolerance_m",0.9));self.minimum=int(rospy.get_param("~minimum_cluster_points",8))
         self.maximum_radius=float(rospy.get_param("~maximum_target_radius_m",1.4));self.maximum_height=float(rospy.get_param("~maximum_target_height_m",2.0))
         self.publisher=rospy.Publisher("/perception/dynamic_detections",String,queue_size=2)
@@ -36,7 +38,8 @@ class LidarDynamicDetector:
         self.vehicles[index]=(position.x+origin[0],position.y+origin[1],position.z)
     def cloud_cb(self,message):
         points=[tuple(p) for p in point_cloud2.read_points(message,field_names=("x","y","z"),skip_nans=True) if p[2]>=self.ground]
-        points=exclude_near_vehicles(points,[v for v in self.vehicles if v is not None],1.0)
+        points=exclude_near_vehicles(points,[v for v in self.vehicles if v is not None],
+                                     self.vehicle_exclusion_radius)
         points=exclude_mapped_static(points,self.static_primitives,self.static_margin)
         dynamic=self.background.update(points);self.frames+=1
         clusters=[] if self.frames<=self.warmup else euclidean_clusters(dynamic,self.tolerance,self.minimum)

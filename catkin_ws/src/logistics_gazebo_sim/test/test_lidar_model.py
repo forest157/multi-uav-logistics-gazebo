@@ -37,5 +37,6 @@ class LidarModelTest(unittest.TestCase):
         self.assertIn('<arg name="lidar_cloud_aggregation" default="true"/>',launch)
         self.assertIn('<node if="$(arg lidar_cloud_aggregation)"',launch)
         self.assertIn('<param name="static_map_margin_m" value="1.5"/>',launch)
+        self.assertEqual(launch.count('<param name="vehicle_exclusion_radius_m" value="1.8"/>'),2)
 
 if __name__=="__main__":unittest.main()
