@@ -1,6 +1,8 @@
 import os,tempfile,unittest
 from logistics_gazebo_sim.world_audit import audit_world,audit_world_directory
-from logistics_gazebo_sim.worlds import render_world
+from logistics_gazebo_sim.worlds import OUTDOOR_LAYOUTS, render_outdoor_variant, render_outdoor_world, render_world
+from logistics_gazebo_sim.outdoor_preflight import metadata_for_world
+import json
 
 
 class WorldAuditTest(unittest.TestCase):
@@ -27,6 +29,28 @@ class WorldAuditTest(unittest.TestCase):
             stream.write('<?xml version="1.0"?><sdf version="1.6"><world name="empty"/></sdf>');path=stream.name
         try:self.assertFalse(audit_world(path)["pass"])
         finally:os.unlink(path)
+
+    def test_outdoor_audit_requires_current_metadata_and_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name,layout in OUTDOOR_LAYOUTS.items():
+                path=os.path.join(directory,name+'.world')
+                with open(path,'w') as stream:stream.write(render_outdoor_variant(name))
+                metadata=dict(layout,**metadata_for_world(name,path))
+                with open(os.path.join(directory,name+'.json'),'w') as stream:
+                    json.dump(metadata,stream)
+                self.assertTrue(audit_world(path)['pass'])
+                metadata['recommended_cruise_altitude_m']+=1
+                with open(os.path.join(directory,name+'.json'),'w') as stream:
+                    json.dump(metadata,stream)
+                report=audit_world(path)
+                self.assertFalse(report['pass'])
+                self.assertIn('outdoor metadata differs from world or layout',report['errors'])
+
+    def test_legacy_outdoor_world_uses_its_own_road_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            canonical=os.path.join(directory,'outdoor_logistics.world')
+            with open(canonical,'w') as stream:stream.write(render_outdoor_world())
+            self.assertTrue(audit_world(canonical)['pass'])
 
 
 if __name__=="__main__":unittest.main()

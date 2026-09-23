@@ -1,6 +1,10 @@
 """Static audit for reproducible, real-scale Gazebo Classic worlds."""
+import json
 import os
 from xml.etree import ElementTree
+
+from .outdoor_preflight import metadata_for_world
+from .worlds import OUTDOOR_LAYOUTS
 
 
 def audit_world(path,max_models=100,max_bytes=250000):
@@ -26,9 +30,29 @@ def audit_world(path,max_models=100,max_bytes=250000):
     if len(names)!=len(set(names)):errors.append("model names must be unique")
     if len(models)>max_models:errors.append("model budget exceeded")
     if size>max_bytes:errors.append("world file budget exceeded")
-    road=next((model for model in models if model.get("name")=="service_road"),None)
-    if road is None:errors.append("missing metric service road")
-    elif road.find("link/collision") is not None:errors.append("road decal must not alter collision map")
+    stem=os.path.splitext(os.path.basename(path))[0]
+    if stem in OUTDOOR_LAYOUTS:
+        try:
+            expected=dict(OUTDOOR_LAYOUTS[stem],**metadata_for_world(stem,path))
+            expected=json.loads(json.dumps(expected))
+            with open(os.path.splitext(path)[0]+'.json',encoding='utf-8') as stream:
+                saved=json.load(stream)
+            if saved!=expected:errors.append('outdoor metadata differs from world or layout')
+        except (OSError,ValueError,KeyError,TypeError,ElementTree.ParseError):
+            errors.append('outdoor world geometry or metadata is invalid')
+    elif stem=='outdoor_logistics':
+        for road_name in ('road_east_west','road_north_south'):
+            road=by_name.get(road_name)
+            if road is None or road.find('link/visual') is None or road.find('link/collision') is not None:
+                errors.append(road_name+': missing visual-only road')
+        for name,model in by_name.items():
+            if name.startswith(('warehouse_','tree_obstacle_')) and not name.endswith('_roof'):
+                if model.find('link/collision') is None or model.find('link/visual') is None:
+                    errors.append(name+': missing collision or visual')
+    else:
+        road=by_name.get('service_road')
+        if road is None:errors.append('missing metric service road')
+        elif road.find('link/collision') is not None:errors.append('road decal must not alter collision map')
     obstacles=[model for model in models if model.get("name","").startswith("obstacle_") and not model.get("name","").endswith("_roof")]
     if any(model.find("link/collision") is None or model.find("link/visual") is None for model in obstacles):errors.append("safety obstacle missing collision or visual")
     return {"path":path,"pass":not errors,"errors":errors,"bytes":size,"model_count":len(models),"collision_count":len(collisions),"visual_count":len(visuals),"sdf_version":root.get("version")}

@@ -1,6 +1,9 @@
 import unittest
+import tempfile
+from pathlib import Path
 from xml.etree import ElementTree as ET
 from logistics_gazebo_sim.worlds import OUTDOOR_LAYOUTS, render_outdoor_variant, render_outdoor_world
+from logistics_gazebo_sim.outdoor_preflight import metadata_for_world
 
 
 class OutdoorLayoutTest(unittest.TestCase):
@@ -24,3 +27,29 @@ class OutdoorLayoutTest(unittest.TestCase):
             for bx, by, w, d, height in layout['blocks']:
                 for rx, ry, rw, rd in layout['roads']:
                     self.assertTrue(abs(bx-rx) >= (w+rw)/2 or abs(by-ry) >= (d+rd)/2)
+
+    def test_metadata_matches_every_generated_world_and_rejects_geometry_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name, layout in OUTDOOR_LAYOUTS.items():
+                path = Path(directory) / (name + '.world')
+                original = render_outdoor_variant(name)
+                path.write_text(original, encoding='utf-8')
+                metadata = metadata_for_world(name, path)
+                self.assertEqual(metadata['maximum_supported_uavs'], 3)
+                self.assertEqual(metadata['sdf_model_count'],
+                                 len(ET.fromstring(original).findall('world/model')))
+                self.assertEqual(len(metadata['no_fly_volumes']), len(layout['blocks']))
+                self.assertGreater(metadata['recommended_cruise_altitude_m'],
+                                   metadata['maximum_building_height_m'])
+                self.assertEqual(metadata['dynamic_obstacle_routes'], [])
+                changed = original.replace('<size>24 22 10</size>',
+                                           '<size>24 22 11</size>', 1)
+                if changed == original:
+                    changed = original.replace('<size>18 16 6</size>',
+                                               '<size>18 16 7</size>', 1)
+                if changed == original:
+                    changed = original.replace('<size>30 28 14</size>',
+                                               '<size>30 28 15</size>', 1)
+                path.write_text(changed, encoding='utf-8')
+                with self.assertRaises(ValueError):
+                    metadata_for_world(name, path)

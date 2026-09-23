@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-23",
+  "branch": "feature/v0511-real-scale-worlds",
+  "environment": {
+    "container": "gazebo-dev",
+    "gazebo": "Classic 11",
+    "gui": false,
+    "host_cpu_logical_count": 32,
+    "host_ram_mib": 31698,
+    "host_gpu": "NVIDIA GeForce RTX 4060 Laptop GPU, 8188 MiB",
+    "sample_duration_s": 12,
+    "scope": "gzserver with one outdoor world; no PX4, lidar, RViz or mission nodes",
+    "measurement_command": "roslaunch gazebo_ros empty_world.launch gui:=false world_name:=<world>; scripts/benchmark_world_resources <world> --seconds 12"
+  },
+  "worlds": {
+    "outdoor_campus": {
+      "real_time_factor": 0.999,
+      "gzserver_cpu_cores": 0.102,
+      "gzserver_rss_start_mib": 243.8,
+      "gzserver_rss_end_mib": 243.8,
+      "gazebo_model_count": 14,
+      "sample_sim_s": 12.008
+    },
+    "outdoor_residential": {
+      "real_time_factor": 0.999,
+      "gzserver_cpu_cores": 0.108,
+      "gzserver_rss_start_mib": 259.0,
+      "gzserver_rss_end_mib": 259.0,
+      "gazebo_model_count": 22,
+      "sample_sim_s": 12.0
+    },
+    "outdoor_urban": {
+      "real_time_factor": 0.999,
+      "gzserver_cpu_cores": 0.112,
+      "gzserver_rss_start_mib": 259.8,
+      "gzserver_rss_end_mib": 259.8,
+      "gazebo_model_count": 22,
+      "sample_sim_s": 12.004
+    }
+  },
+  "acceptance_limitations": [
+    "Empty-world results cannot establish three-UAV flight real-time performance.",
+    "GPU use was not measured in this headless run.",
+    "Outdoor planner and mission integration is pending."
+  ]
+}

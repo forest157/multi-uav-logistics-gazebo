@@ -3,6 +3,7 @@ import argparse
 import os
 import json
 from logistics_gazebo_sim.worlds import write_worlds, render_outdoor_world, OUTDOOR_LAYOUTS, render_outdoor_variant
+from logistics_gazebo_sim.outdoor_preflight import metadata_for_world
 
 parser = argparse.ArgumentParser()
 parser.add_argument("output_dir")
@@ -17,8 +18,7 @@ for name, layout in OUTDOOR_LAYOUTS.items():
     path = os.path.join(args.output_dir, name + '.world')
     with open(path, 'w', encoding='utf-8') as stream:
         stream.write(render_outdoor_variant(name))
-    metadata = dict(layout, coordinate_system='ENU', linear_unit='metre',
-                    start=layout['pads'][0], status='layout_only_pending_mission_integration')
+    metadata = dict(layout, **metadata_for_world(name, path))
     with open(os.path.join(args.output_dir, name + '.json'), 'w', encoding='utf-8') as stream:
         json.dump(metadata, stream, indent=2)
         stream.write('\n')
