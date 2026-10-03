@@ -126,6 +126,19 @@ class DetectionAssociator:
                 predicted=[p+v*dt for p,v in zip(track["position"],velocity)]
                 value=math.sqrt(sum((a-b)**2 for a,b in zip(detection["position"],predicted)))
                 if value<distance:best,distance=identity,value
+            if best is not None:
+                track=self.tracks[best];dt=stamp-track["stamp"]
+                prior=track.get("velocity")
+                if track["confirmed"] and prior is not None and dt>0.0:
+                    instantaneous=[(float(a)-float(b))/dt for a,b in zip(
+                        detection["position"],track["position"])]
+                    acceleration=math.sqrt(sum((a-b)**2 for a,b in zip(
+                        instantaneous,prior)))/dt
+                    # A confirmed lidar target must not reverse several m/s
+                    # in one scan because a fragment was associated to it.
+                    # Start a new provisional track and let the old one coast.
+                    if acceleration>max(15.0,3.0*self.maximum_acceleration):
+                        best=None
             if best is None:
                 best="lidar_target_{}".format(self.sequence);self.sequence+=1
                 self.tracks[best]={"hits":0,"motion_hits":0,"misses":0,

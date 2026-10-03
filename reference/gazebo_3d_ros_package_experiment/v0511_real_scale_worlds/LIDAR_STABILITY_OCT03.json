@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-03",
+  "branch": "feature/v0511-real-scale-worlds",
+  "world": "scene_0",
+  "sensor": "physical 3D lidar",
+  "avoidance": "ORCA limited",
+  "truth_use": "offline evaluation only; never supplied to perception or control",
+  "runs": [
+    {
+      "scenario": "three UAVs, no birds",
+      "capture": "/tmp/no_bird_lidar_smoothing_oct03.jsonl",
+      "code_stage": "vertical-command gate and recovery latch; before confirmed-track innovation rejection",
+      "samples": 3177,
+      "valid_truth_samples": 3177,
+      "frames_with_perception_tracks": 0,
+      "active_avoidance_samples": 0,
+      "minimum_fleet_separation_m": 3.16125870020466,
+      "maximum_estimate_error_m": 0.5195348889038871,
+      "maximum_settled_vertical_tracking_error_m": 0.49900496704233355,
+      "complete": true,
+      "disarmed": true,
+      "passed": true
+    },
+    {
+      "scenario": "three UAVs, one head-on returning bird, rejected prototype",
+      "capture": "/tmp/head_on_lidar_smoothing_oct03.jsonl",
+      "code_stage": "included 0.6 s horizontal reversal dwell, subsequently removed",
+      "samples": 4683,
+      "valid_truth_samples": 4683,
+      "minimum_bird_envelope_clearance_m": -0.30369489290864937,
+      "minimum_fleet_separation_m": 3.2029163996838417,
+      "maximum_settled_vertical_tracking_error_m": 0.49672736602772716,
+      "complete": true,
+      "disarmed": true,
+      "passed": false,
+      "diagnostic": "At sim time about 311.08 s, one confirmed lidar target's estimated y velocity flipped from +2.94 to -5.08 m/s within one scan; safety hold and temporary target loss followed. The prototype dwell was removed. This record does not isolate either factor's causal contribution."
+    },
+    {
+      "scenario": "three UAVs, one head-on returning bird, final code",
+      "capture": "/tmp/head_on_lidar_smoothing_oct03_r2.jsonl",
+      "samples": 4919,
+      "valid_truth_samples": 4919,
+      "minimum_bird_envelope_clearance_m": 0.8314041647265233,
+      "minimum_fleet_separation_m": 3.240048819218976,
+      "maximum_estimate_error_m": 0.5374939881712515,
+      "maximum_settled_vertical_tracking_error_m": 0.4992252273558453,
+      "frames_with_perception_tracks": 1439,
+      "active_avoidance_samples": 2544,
+      "orca_raw_vertical_command_max_abs_mps": 0.7996568133332765,
+      "complete": true,
+      "disarmed": true,
+      "passed": true
+    }
+  ],
+  "limitations": "Independent sampled truth and conservative spherical envelopes are not contact-sensor proof. One passing head-on run does not cover every lidar target, occlusion, or multi-target scenario. Raw JSONL stays in the container's /tmp and is not committed."
+}

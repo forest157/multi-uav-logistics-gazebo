@@ -47,12 +47,40 @@ class LocalAvoidanceTest(unittest.TestCase):
         gate=OrcaCommandGate(1,max_climb_rate=.8)
         context=self.execution_context(velocity=(0,0,0))
         context["nominal_errors"]=[5.]
+        context["nominal_vertical_errors"]=[5.]
         plan=dict(viable=False,algorithm="orca3d",command_type="per_vehicle_velocity",
                   contract_version="orca_velocity_v1",stamp=10.,valid_for_s=.6,
                   constraints_satisfied=False,static_validation=dict(feasible=False),
                   commands=[dict(vehicle_id="uav0",velocity=[.2,.1,-2.],preferred_velocity=[.2,.1,-2.])])
         gate.condition(plan,10.,.2,safety_context=context)
         self.assertAlmostEqual(gate.target_velocities[0][2],-.8)
+
+    def test_clear_air_horizontal_error_does_not_create_vertical_motion(self):
+        gate=OrcaCommandGate(1)
+        context=self.execution_context()
+        context['nominal_errors']=[5.0]
+        context['nominal_vertical_errors']=[0.15]
+        plan=self.plan_for_velocity((1,0,.7),10.)
+        gate.condition(plan,10.,.2,safety_context=context)
+        self.assertEqual(gate.target_velocities[0][2],0.)
+        self.assertEqual(gate.current(10.2)[0][2],0.)
+
+    def test_cached_vertical_command_is_removed_when_height_is_recovered(self):
+        gate=OrcaCommandGate(1)
+        gate.condition(self.plan_for_velocity((.5,0,.7),10.),10.,.2)
+        self.assertGreater(gate.target_velocities[0][2],0.)
+        context=self.execution_context()
+        context['stamp']=10.2
+        context['nominal_vertical_errors']=[0.1]
+        gate.refresh(context,10.2)
+        self.assertEqual(gate.target_velocities[0][2],0.)
+
+    def plan_for_velocity(self, velocity, stamp):
+        return dict(viable=True,algorithm='orca3d',command_type='per_vehicle_velocity',
+                    contract_version='orca_velocity_v1',stamp=stamp,valid_for_s=.6,
+                    constraints_satisfied=True,static_validation=dict(feasible=True),
+                    commands=[dict(vehicle_id='uav0',velocity=velocity,
+                                   preferred_velocity=(0,0,0))])
 
     def execution_context(self,position=(0,0,8),velocity=(0,0,0),obstacles=None):
         return dict(stamp=10.,positions=[position],velocities=[velocity],

@@ -91,6 +91,7 @@ class MissionPlayer:
         self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None
         self.last_orca_update=None
         self.orca_recovering=False
+        self.orca_clear_since=None
         self.avoidance_execution=AvoidanceExecution(
             confirmation_s=float(rospy.get_param("~avoidance_confirmation_s",0.6)),
             apply_s=float(rospy.get_param("~avoidance_apply_s",4.0)),
@@ -150,7 +151,16 @@ class MissionPlayer:
                                     "failure":None,"velocities":None}
             context=payload.get("execution_context")
             errors=(context or {}).get("nominal_errors")
-            if level=="SAFE" and errors and max(errors)<=.6:self.orca_recovering=False
+            clear_candidate=(level=="SAFE" and response_action=="NORMAL" and
+                             self.dynamic_obstacle_count==0 and
+                             isinstance(errors,list) and len(errors)==self.count and
+                             all(isinstance(value,(int,float)) and math.isfinite(value)
+                                 and 0.0<=value<=0.5 for value in errors))
+            if self.orca_recovering and clear_candidate:
+                if self.orca_clear_since is None:self.orca_clear_since=now
+                if now-self.orca_clear_since>=0.8:
+                    self.orca_recovering=False;self.orca_clear_since=None
+            else:self.orca_clear_since=None
             if (level in ("WARNING","CRITICAL") or getattr(self,"orca_recovering",False)) and self.orca_control_mode=="limited":
                 pending=bool((avoidance.get("rejection_summary") or {}).get("PLANNER_PENDING"))
                 if pending:
@@ -218,7 +228,7 @@ class MissionPlayer:
         self.emergency_land=True;self.enabled,self.paused=False,False;self.takeoff_pub.publish(False);self.complete_pub.publish(True);return TriggerResponse(True,"emergency landing requested")
     def _reset(self,_):
         self.enabled=False;self.paused=False;self.start_time=None;self.pause_time=None;self.emergency_land=False;self.elapsed=0.0;self.last_stage=None;self.landing_ready_since=None
-        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.dynamic_obstacle_count=0;self.safety_interlock.engaged=False;self.safety_interlock.safe_since=None;self.safety_interlock.reason=None;self.safety_hold_targets=None;self.energy_advisory={};self.energy_advisory_stamp=None;self.energy_diversion=None;self.last_clock=rospy.Time.now()
+        self.dynamic_response.reset();self.avoidance_execution.reset();self.orca_gate.reset();self.orca_velocities=None;self.orca_plan_stamp=None;self.orca_failure=None;self.last_orca_update=None;self.orca_recovering=False;self.orca_clear_since=None;self.avoidance_command=self.avoidance_execution.command(rospy.get_time());self.dynamic_action,self.dynamic_scale,self.dynamic_level="NORMAL",1.0,"STALE";self.dynamic_hold_targets=None;self.dynamic_obstacle_count=0;self.safety_interlock.engaged=False;self.safety_interlock.safe_since=None;self.safety_interlock.reason=None;self.safety_hold_targets=None;self.energy_advisory={};self.energy_advisory_stamp=None;self.energy_diversion=None;self.last_clock=rospy.Time.now()
         self.complete_pub.publish(False);self.takeoff_pub.publish(False)
         return TriggerResponse(True,"mission reset; takeoff authorization revoked")
 

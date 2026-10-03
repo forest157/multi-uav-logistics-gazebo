@@ -16,9 +16,13 @@ class OrcaExecutionTest(unittest.TestCase):
         self.call(p,"SAFE",context=dict(stamp=10.,nominal_errors=[5.]))
         self.assertEqual(p.dynamic_action,"ORCA");self.assertTrue(p.orca_recovering)
         p.orca_gate.condition.reset_mock()
-        self.call(p,"SAFE",context=dict(stamp=10.,nominal_errors=[.2]))
+        self.call(p,"SAFE",context=dict(stamp=10.,nominal_errors=[.2]),obstacle_count=0)
+        self.assertTrue(p.orca_recovering)
+        self.call(p,"SAFE",context=dict(stamp=10.5,nominal_errors=[.2]),now=10.5,obstacle_count=0)
+        self.assertTrue(p.orca_recovering)
+        self.call(p,"SAFE",context=dict(stamp=10.85,nominal_errors=[.2]),now=10.85,obstacle_count=0)
         self.assertEqual(p.dynamic_action,"NORMAL");self.assertFalse(p.orca_recovering)
-        p.orca_gate.condition.assert_not_called()
+        self.assertIsNone(p.orca_clear_since)
 
     def instance(self):
         p=player.MissionPlayer.__new__(player.MissionPlayer)
@@ -28,14 +32,23 @@ class OrcaExecutionTest(unittest.TestCase):
         p.current_poses=[(0,0,8)];p.dynamic_hold_targets=None
         p.orca_gate=Mock();p.orca_gate.condition.return_value=[(1,0,0)]
         p.orca_gate.refresh.side_effect=DynamicObstacleError("no cached command")
-        p.orca_plan_stamp=None;p.orca_failure=None;p.orca_recovering=False
+        p.orca_plan_stamp=None;p.orca_failure=None;p.orca_recovering=False;p.orca_clear_since=None;p.count=1
         return p
 
-    def call(self,p,level,plan=None,context=None):
-        payload=dict(level=level,obstacle_count=1,avoidance=plan or dict(stamp=10.,viable=True),
+    def call(self,p,level,plan=None,context=None,now=10.,obstacle_count=1):
+        payload=dict(level=level,obstacle_count=obstacle_count,avoidance=plan or dict(stamp=now,viable=True),
                      execution_context=context)
-        with patch.object(player.rospy,"get_time",return_value=10.),patch.object(player.rospy,"logwarn"):
+        with patch.object(player.rospy,"get_time",return_value=now),patch.object(player.rospy,"logwarn"):
             p._dynamic_risk_cb(String(data=json.dumps(payload)))
+
+    def test_reappearance_resets_clear_release_timer(self):
+        p=self.instance();p.orca_recovering=True
+        clear=dict(stamp=10.,nominal_errors=[.2])
+        self.call(p,"SAFE",context=clear,obstacle_count=0)
+        self.call(p,"WARNING",context=clear,now=10.4)
+        self.assertIsNone(p.orca_clear_since)
+        self.call(p,"SAFE",context=clear,now=10.9,obstacle_count=0)
+        self.assertTrue(p.orca_recovering)
 
     def test_critical_can_continue_only_after_execution_validation(self):
         p=self.instance();self.call(p,"CRITICAL",context=dict(stamp=10.))

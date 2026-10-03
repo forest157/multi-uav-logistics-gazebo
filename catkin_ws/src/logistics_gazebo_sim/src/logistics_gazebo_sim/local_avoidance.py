@@ -67,6 +67,12 @@ class OrcaCommandGate:
             desired.append(target);preferred.append(base)
         return desired,preferred
     def _safe_target(self, desired, context, now):
+        obstacles=bool(context.get("obstacles"))
+        vertical_errors=context.get("nominal_vertical_errors")
+        vertical_recovery=(not obstacles and isinstance(vertical_errors,(list,tuple))
+                           and len(vertical_errors)==self.vehicle_count
+                           and all(np.isfinite(float(value)) for value in vertical_errors)
+                           and max(abs(float(value)) for value in vertical_errors)>0.8)
         full_candidates=[]
         if self.target_velocities is not None:
             full_candidates.append([old+self.smoothing*(new-old)
@@ -76,12 +82,15 @@ class OrcaCommandGate:
         # independently safe. This prevents lidar centroid height noise from
         # becoming an unexplained climb/descent avoidance command. Once tracks
         # clear, a validated vertical target may return to the nominal route.
-        candidates=[];prefer_horizontal=bool(context.get("obstacles"))
+        candidates=[];prefer_horizontal=obstacles
         for candidate in full_candidates:
             horizontal=[np.asarray([value[0],value[1],0.],dtype=float)
                         for value in candidate]
-            candidates.extend((horizontal,candidate) if prefer_horizontal
-                              else (candidate,horizontal))
+            if not obstacles and not vertical_recovery:
+                candidates.append(horizontal)
+            else:
+                candidates.extend((horizontal,candidate) if prefer_horizontal
+                                  else (candidate,horizontal))
         for candidate in candidates:
             if validate_orca_execution(candidate,context,now,self.max_acceleration):
                 return [np.asarray(value,dtype=float) for value in candidate]
@@ -182,6 +191,17 @@ class OrcaCommandGate:
         with self._lock:
             if self.target_velocities is None:
                 raise DynamicObstacleError("ORCA command is unavailable")
+            vertical_errors=safety_context.get("nominal_vertical_errors")
+            if (not safety_context.get("obstacles") and
+                    isinstance(vertical_errors,(list,tuple)) and
+                    len(vertical_errors)==self.vehicle_count and
+                    all(np.isfinite(float(value)) and abs(float(value))<=0.8
+                        for value in vertical_errors)):
+                horizontal=[np.asarray([value[0],value[1],0.],dtype=float)
+                            for value in self.target_velocities]
+                if validate_orca_execution(horizontal,safety_context,now,
+                                           self.max_acceleration):
+                    self.target_velocities=horizontal
             if not validate_orca_execution(self.target_velocities,safety_context,now,
                                            self.max_acceleration):
                 raise DynamicObstacleError("cached ORCA trajectory is unsafe")

@@ -72,6 +72,22 @@ class PointCloudPerceptionTest(unittest.TestCase):
         reacquired=model.update([{"position":[4.2,0,5]}],1.4)
         self.assertEqual(reacquired[0]["id"],identity)
 
+    def test_confirmed_target_rejects_single_scan_velocity_flip(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8,
+                                  maximum_acceleration=5.0,maximum_track_age=1.5)
+        for index in range(4):
+            confirmed=model.update([{"position":[0,.6*index,5]}],.2*index)
+        identity=confirmed[0]["id"]
+        self.assertGreater(model.tracks[identity]["velocity"][1],2.5)
+        # The displaced centroid still fits the association radius, but its
+        # implied acceleration exceeds 40 m/s² and must not flip this track.
+        result=model.update([{"position":[0,.8,5]}],.8)
+        self.assertEqual(result,[])
+        self.assertGreater(model.tracks[identity]["velocity"][1],2.5)
+        self.assertEqual(model.tracks[identity]["misses"],1)
+        result=model.update([{"position":[0,3.0,5]}],1.0)
+        self.assertEqual(result[0]["id"],identity)
+
     def test_prediction_expires_id_after_occlusion_limit(self):
         model=DetectionAssociator(maximum_track_age=.5)
         model.update([{"position":[0,0,5]}],0.0);model.update([],.6)

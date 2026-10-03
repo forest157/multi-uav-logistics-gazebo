@@ -194,6 +194,7 @@ class DynamicRiskMonitor:
         obstacles=[dict(o,position=[p+age*v for p,v in zip(o["position"],o["velocity"])]) for o in self.obstacles]
         return dict(stamp=now,positions=positions,velocities=self.velocities,obstacles=obstacles,
                     nominal_errors=[math.dist(positions[i],[p.x+self.origins[i][0],p.y+self.origins[i][1],p.z]) for i,p in enumerate(self.targets)],
+                    nominal_vertical_errors=[positions[i][2]-p.z for i,p in enumerate(self.targets)],
                     horizon=self.horizon,control_delay=self.control_delay,
                     minimum_separation=self.minimum_separation,
                     required_clearance=self.orca_required_clearance,
