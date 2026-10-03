@@ -55,6 +55,8 @@ roslaunch logistics_gazebo_sim operator_station.launch
 
 ## 下一步
 
+2026-10-03 新进展：`plan_outdoor_route` 已将三个真实尺度室外世界的经校验 SDF 几何接入离线 OMPL：水平边界不再固定 ±46 m，建筑盒按三机编队包络外扩，初始高度带高于最高屋顶，并对规划路径做独立逐段净空复核。园区、住宅、街区三张地图均规划通过；221 个单测和 catkin 构建通过。此结果不是室外飞行许可，仍须统一 PX4 出生点、任务终点、雷达静态地图、安全边界，再做三机完整任务和资源预算。用户暂缓双鸟测试，不要将其列为当前阻塞项。最近代码提交后请核对远端分支是否同步。
+
 1. 单鸟横穿物理雷达 + ORCA limited 完整任务已通过：鸟机保守包络最小净空 2.5539 m、机间最小距离 3.1795 m、最大估计误差 0.5460 m，任务完成并解除武装。摘要见 `v0511_real_scale_worlds/ORCA_LIDAR_FULL_MISSION_SEP17.json`。
 2. 纯无鸟完整任务已通过：4983/4983 有效样本，感知目标 0、飞行阶段避障接管 0、机间最小距离 3.2116 m、收敛后最大高度误差 0.4982 m。摘要见 `v0511_real_scale_worlds/NO_BIRD_LIDAR_FULL_MISSION_SEP17.json`。
 3. 雷达断流恢复完整任务已通过：停止聚合器后按顺序进入 STALE/SLOW 和 STALE/HOLD，重启后经 SAFE/HOLD 释放保护恢复 SAFE/NORMAL；虚假目标和非预期接管均为 0，最终 COMPLETE/解除武装。摘要见 `v0511_real_scale_worlds/LIDAR_DROPOUT_RECOVERY_FULL_MISSION_SEP18.json`。
