@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Extract non-persistent dynamic clusters from the aggregated physical lidar cloud."""
 import json
+import os
+import rospkg
 import rospy
 from logistics_gazebo_sim.pointcloud_perception import exclude_mapped_static
-from logistics_gazebo_sim.clearance_analyzer import obstacle_primitives
-from logistics_gazebo_sim.scenes import SCENES
+from logistics_gazebo_sim.static_world_map import static_primitives_for_world
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs import point_cloud2
@@ -20,7 +21,11 @@ class LidarDynamicDetector:
         self.ground=float(rospy.get_param("~ground_filter_z",0.7));self.warmup=int(rospy.get_param("~warmup_frames",8));self.frames=0
         self.background=VoxelBackground(rospy.get_param("~voxel_size_m",0.45),rospy.get_param("~background_hits",4),rospy.get_param("~forget_after_frames",40))
         scene=rospy.get_param("~scene_id",None)
-        self.static_primitives=[] if scene is None else obstacle_primitives(SCENES[int(scene)])
+        outdoor_world=rospy.get_param("~outdoor_world",None)
+        world_dir=(os.path.join(rospkg.RosPack().get_path('logistics_gazebo_sim'),
+                                'worlds') if outdoor_world else None)
+        self.static_primitives=static_primitives_for_world(scene,outdoor_world,
+                                                           world_dir)
         self.static_margin=float(rospy.get_param("~static_map_margin_m",1.5))
         if self.static_margin<0.0:raise ValueError("static map margin must be non-negative")
         self.vehicle_exclusion_radius=float(rospy.get_param("~vehicle_exclusion_radius_m",1.8))
