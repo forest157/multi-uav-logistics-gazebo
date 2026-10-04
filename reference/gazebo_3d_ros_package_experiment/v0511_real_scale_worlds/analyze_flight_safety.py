@@ -134,9 +134,13 @@ if __name__=="__main__":
                       help="audit a declared no-bird scenario and reject any tracks or avoidance")
     mode.add_argument("--expect-dropout-recovery",action="store_true",
                       help="require SAFE/NORMAL -> STALE/SLOW -> STALE/HOLD -> SAFE/NORMAL")
+    parser.add_argument("--spawn-x",type=float,default=-40.0)
+    parser.add_argument("--spawn-y",type=float,default=-40.0)
+    parser.add_argument("--spacing",type=float,default=3.3)
     args=parser.parse_args()
     with open(args.capture) as stream:report=analyze(
         (json.loads(line) for line in stream),
+        spawn_x=args.spawn_x,spawn_y=args.spawn_y,spacing=args.spacing,
         require_bird=not (args.allow_no_birds or args.expect_dropout_recovery),
         expect_dropout_recovery=args.expect_dropout_recovery)
     print(json.dumps(report,indent=2))

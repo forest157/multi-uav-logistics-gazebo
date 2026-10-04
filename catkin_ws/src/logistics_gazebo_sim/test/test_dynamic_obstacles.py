@@ -160,6 +160,17 @@ class DynamicObstacleTest(unittest.TestCase):
         report=validate_static_paths(0,[[[0.0,47.5,45.0,8.0],[2.0,48.0,45.0,8.0]]])
         self.assertTrue(report["feasible"])
 
+    def test_outdoor_static_paths_use_verified_metric_world(self):
+        clear=validate_static_paths('outdoor_campus',
+            [[[0.0,-45.0,-65.0,19.0],[10.0,60.0,65.0,19.0]]])
+        self.assertTrue(clear['feasible'],clear)
+        building=validate_static_paths('outdoor_campus',
+            [[[0.0,-55.0,-38.0,8.0],[1.0,-55.0,-38.0,8.0]]])
+        self.assertEqual(building['error_code'],'E_STATIC_CLEARANCE')
+        boundary=validate_static_paths('outdoor_campus',
+            [[[0.0,89.0,0.0,19.0],[1.0,89.0,0.0,19.0]]])
+        self.assertEqual(boundary['error_code'],'E_BOUNDARY')
+
 
     def test_static_boundary_rejects_collective_candidate(self):
         paths=[[[0.0,44.0,0.0,8.0],[10.0,45.0,0.0,8.0]]]

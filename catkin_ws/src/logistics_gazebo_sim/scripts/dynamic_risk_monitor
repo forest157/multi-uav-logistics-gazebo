@@ -14,7 +14,11 @@ from logistics_gazebo_sim.dynamic_obstacles import ObstacleMemory, RiskLevelHyst
 class DynamicRiskMonitor:
     def __init__(self):
         self.count = int(rospy.get_param("~vehicle_count", 3))
-        self.scene_id = int(rospy.get_param("~scene_id", 0))
+        outdoor_world=rospy.get_param("~outdoor_world",None)
+        if outdoor_world and rospy.has_param("~scene_id"):
+            raise ValueError("select either outdoor_world or scene_id")
+        self.scene_id=(str(outdoor_world) if outdoor_world else
+                       int(rospy.get_param("~scene_id",0)))
         self.horizon = float(rospy.get_param("~horizon_s", 8.0))
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))

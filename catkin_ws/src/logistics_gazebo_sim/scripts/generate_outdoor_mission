@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Write a validated outdoor mission YAML; never starts aircraft."""
+
+import argparse
+import json
+import os
+
+import roslib.packages
+import rospkg
+import yaml
+
+from logistics_gazebo_sim.outdoor_mission import outdoor_mission
+from logistics_gazebo_sim.worlds import OUTDOOR_LAYOUTS
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('world', choices=sorted(OUTDOOR_LAYOUTS))
+    parser.add_argument('--output', required=True)
+    parser.add_argument('--solve-seconds', type=float, default=3.0)
+    args = parser.parse_args()
+    package = rospkg.RosPack().get_path('logistics_gazebo_sim')
+    executables = roslib.packages.find_node('logistics_gazebo_sim',
+                                             'ompl_3d_planner')
+    if not executables:
+        parser.error('build ompl_3d_planner before generating a mission')
+    config, report = outdoor_mission(args.world,
+                                     os.path.join(package, 'worlds'),
+                                     executables[0], args.solve_seconds)
+    with open(args.output, 'w', encoding='utf-8') as stream:
+        yaml.safe_dump(config, stream, sort_keys=False)
+    print(json.dumps(report, sort_keys=True))
+
+
+if __name__ == '__main__':
+    main()

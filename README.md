@@ -18,7 +18,15 @@
 
 ## 当前版本
 
-当前稳定基线为 `v0.4.5`，`main` 使用统一单一 ROS 包。ORCA 支持动态 TTC、规划等待、风险迟滞和独立安全门约束下的受限闭环；分布式 MPC 保持影子模式，不接管飞控。
+当前稳定基线为 `v0.5.11`，`main` 使用统一单一 ROS 包。园区、住宅和街区三个真实尺度自建室外世界均完成三机物理雷达投递返航验收；ORCA 仅在安全门约束下受限接管，分布式 MPC 仍保持影子模式。导入的 Baylands 世界仅完成资产、许可证、碰撞体及空载加载核验，**尚未接入三机自动飞行**。
+
+## 仿真画面
+
+以下为 `v0.5.11` 园区无鸟三机任务完成后的真实 Gazebo 截图，分别展示场景道路布局与返航起点视角；截图不是动态避障或其他世界的验收证据。更多画面与相应测试记录见 [仿真图片展示](docs/SIMULATION_GALLERY.md)。
+
+[![园区道路与建筑场景](docs/images/outdoor_campus_wide_oct04.jpg)](docs/SIMULATION_GALLERY.md)
+
+[![三机返航起点视角](docs/images/outdoor_campus_home_oct04.jpg)](docs/SIMULATION_GALLERY.md)
 
 ## 版本历史与后续计划
 
@@ -50,7 +58,7 @@ source /home/devuser/catkin_ws/devel/setup.bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover -s test -q
 ```
 
-当前统一基线应通过 67 项 Python 回归测试，并能成功执行 `catkin build logistics_gazebo_sim`。
+`v0.5.11` 发布前通过 239 项 Python 回归测试与 `catkin build logistics_gazebo_sim`。完整 Gazebo 飞行和保守真值净空审计见 [仿真图片展示](docs/SIMULATION_GALLERY.md) 所链接的报告；单元测试不能代替飞行验收。
 
 ## 恢复历史版本
 

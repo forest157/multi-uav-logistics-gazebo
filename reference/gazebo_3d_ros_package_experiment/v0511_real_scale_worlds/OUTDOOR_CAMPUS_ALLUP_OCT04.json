@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-04",
+  "branch": "feature/v0511-real-scale-worlds",
+  "world": "outdoor_campus",
+  "world_sha256": "f2b0b7511dae197a5c784af2032d7ff05d09194610ae7606df07eaab29f8aa05",
+  "configuration": "three PX4 vehicles, physical lidar, dynamic risk monitor, ORCA limited, safety monitor, energy return advisor",
+  "acceptance_scope": "Offline sampled Gazebo truth with conservative sphere envelopes; not a continuous contact-sensor proof",
+  "no_bird": {
+    "capture": "/tmp/outdoor_campus_allup_oct04.jsonl",
+    "audit": "/tmp/outdoor_campus_allup_audit_oct04.json",
+    "flight_samples": 3965,
+    "valid_truth_samples": 3965,
+    "fresh_lidar_samples": 3965,
+    "fresh_safety_samples": 3965,
+    "minimum_truth_separation_m": 3.255362099379534,
+    "minimum_truth_static_clearance_m": 1.6115728653879466,
+    "maximum_estimate_error_m": 0.6510781204290539,
+    "maximum_settled_vertical_error_m": 0.4762972460726722,
+    "maximum_lidar_confirmed_targets": 0,
+    "unexpected_avoidance_samples": 0,
+    "safety_error_samples": 0,
+    "complete": true,
+    "disarmed": true,
+    "passed": true
+  },
+  "single_bird": {
+    "capture": "/tmp/outdoor_campus_single_bird_oct04.jsonl",
+    "audit": "/tmp/outdoor_campus_single_bird_audit_oct04.json",
+    "flight_samples": 4294,
+    "valid_truth_samples": 4294,
+    "fresh_lidar_samples": 4294,
+    "fresh_safety_samples": 4294,
+    "minimum_truth_separation_m": 3.288267828348204,
+    "minimum_truth_static_clearance_m": 1.8550876467670119,
+    "minimum_bird_clearance_m": 1.6199697536036446,
+    "maximum_estimate_error_m": 0.6434180514879461,
+    "maximum_settled_vertical_error_m": 0.4980512474662042,
+    "maximum_lidar_confirmed_targets": 1,
+    "active_orca_samples": 503,
+    "safety_error_samples": 0,
+    "complete": true,
+    "disarmed": true,
+    "passed": true
+  },
+  "verification": {
+    "unit_tests_passed": 236,
+    "catkin_build": "4 packages succeeded, no warnings",
+    "simulator_processes_closed": true
+  },
+  "release_status": "local development only; not committed, pushed, tagged, or formally released"
+}

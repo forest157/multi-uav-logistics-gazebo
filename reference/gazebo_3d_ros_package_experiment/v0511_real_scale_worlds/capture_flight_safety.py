@@ -5,6 +5,7 @@ import threading
 import rospy
 from mavros_msgs.msg import State, PositionTarget
 from gazebo_msgs.msg import ModelStates
+from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import String
 
@@ -13,6 +14,7 @@ class Capture:
     def __init__(self, output):
         self.output=output;self.lock=threading.RLock()
         self.poses={};self.truth={};self.state={};self.status={}
+        self.perception_receipt_stamp=None;self.safety={};self.safety_receipt_stamp=None
         self.targets={};self.velocities={};self.flight_states={};self.latest_tracks={};self.truth_stamp=None;self.raw_setpoints={}
         for i in range(3):
             rospy.Subscriber('/uav%d/mavros/local_position/pose'%i,PoseStamped,self.pose,i,queue_size=1)
@@ -26,6 +28,7 @@ class Capture:
         rospy.Subscriber('/gazebo/model_states',ModelStates,self.models,queue_size=1)
         rospy.Subscriber('/fleet/mission_state',String,self.mission,queue_size=1)
         rospy.Subscriber('/perception/status',String,self.perception,queue_size=1)
+        rospy.Subscriber('/fleet/diagnostics',DiagnosticArray,self.safety_cb,queue_size=1)
         rospy.Subscriber('/perception/dynamic_tracks',String,self.tracks,queue_size=5)
         self.timer=rospy.Timer(rospy.Duration(0.1),self.snapshot)
 
@@ -57,7 +60,15 @@ class Capture:
         with self.lock:self.state=json.loads(msg.data)
 
     def perception(self,msg):
-        with self.lock:self.status=json.loads(msg.data)
+        with self.lock:
+            self.status=json.loads(msg.data)
+            self.perception_receipt_stamp=rospy.get_time()
+
+    def safety_cb(self,msg):
+        with self.lock:
+            self.safety={entry.name:dict(level=entry.level,message=entry.message)
+                         for entry in msg.status}
+            self.safety_receipt_stamp=rospy.get_time()
 
     def tracks(self,msg):
         with self.lock:self.latest_tracks=json.loads(msg.data)
@@ -66,7 +77,7 @@ class Capture:
         # Independent timer preserves evidence during target loss and before detection.
         # ModelStates has no header: receipt time is not an exact physics timestamp.
         with self.lock:
-            self.output.write(json.dumps(dict(stamp=rospy.get_time(),tracks=self.latest_tracks,poses=self.poses,targets=self.targets,raw_setpoints=self.raw_setpoints,velocities=self.velocities,flight_states=self.flight_states,truth_receipt_stamp=self.truth_stamp,truth_evaluation_only=self.truth,mission=self.state,perception=self.status))+'\n')
+            self.output.write(json.dumps(dict(stamp=rospy.get_time(),tracks=self.latest_tracks,poses=self.poses,targets=self.targets,raw_setpoints=self.raw_setpoints,velocities=self.velocities,flight_states=self.flight_states,truth_receipt_stamp=self.truth_stamp,truth_evaluation_only=self.truth,mission=self.state,perception=self.status,perception_receipt_stamp=self.perception_receipt_stamp,safety=self.safety,safety_receipt_stamp=self.safety_receipt_stamp))+'\n')
             self.output.flush()
 
 

@@ -1,8 +1,26 @@
 """Static lidar exclusion primitives from a selected, verified world."""
 
+import math
+
 from .clearance_analyzer import obstacle_primitives
 from .outdoor_world_profile import load_outdoor_profile
 from .scenes import SCENES
+
+
+def primitive_distance(position, primitive):
+    """Metric 3D distance to a ground-based static collision primitive."""
+    x, y, z = position
+    if primitive['kind'] == 'box':
+        dx = max(abs(x - primitive['x']) - primitive['half_x'], 0.0)
+        dy = max(abs(y - primitive['y']) - primitive['half_y'], 0.0)
+    elif primitive['kind'] == 'cylinder':
+        dx = max(math.hypot(x - primitive['x'], y - primitive['y'])
+                 - primitive['radius'], 0.0)
+        dy = 0.0
+    else:
+        raise ValueError('unsupported static primitive')
+    dz = max(-z, z - primitive['height'], 0.0)
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 def static_primitives_for_world(scene_id=None, outdoor_world=None,

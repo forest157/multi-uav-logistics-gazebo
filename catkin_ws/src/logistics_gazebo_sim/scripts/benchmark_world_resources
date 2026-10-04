@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure an already running Gazebo world's empty-scene resource baseline."""
+"""Measure Gazebo and, optionally, its complete ROS/PX4 launch tree."""
 import argparse
 import json
 import os
@@ -26,6 +26,87 @@ def process_sample(pid):
     return cpu_ticks, int(match.group(1))
 
 
+def parent_pid(pid):
+    with open('/proc/{}/status'.format(pid), encoding='utf-8') as stream:
+        status = stream.read()
+    match = re.search(r'^PPid:\s+(\d+)$', status, re.MULTILINE)
+    if match is None:
+        raise RuntimeError('missing process parent for {}'.format(pid))
+    return int(match.group(1))
+
+
+def launch_root(pid):
+    """Find the roslaunch that owns the selected Gazebo server."""
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        with open('/proc/{}/comm'.format(pid), encoding='utf-8') as stream:
+            if stream.read().strip() == 'roslaunch':
+                return pid
+        pid = parent_pid(pid)
+    raise RuntimeError('Gazebo server is not owned by roslaunch')
+
+
+def launch_tree(root):
+    children = {}
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            parent = parent_pid(pid)
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        children.setdefault(parent, []).append(pid)
+    found = {root}
+    queue = [root]
+    while queue:
+        for child in children.get(queue.pop(), ()):
+            if child not in found:
+                found.add(child)
+                queue.append(child)
+    return found
+
+
+def process_pss_kib(pid):
+    with open('/proc/{}/smaps_rollup'.format(pid), encoding='utf-8') as stream:
+        rollup = stream.read()
+    match = re.search(r'^Pss:\s+(\d+)\s+kB$', rollup, re.MULTILINE)
+    if match is None:
+        raise RuntimeError('PSS is unavailable for {}'.format(pid))
+    return int(match.group(1))
+
+
+def tree_sample(root):
+    ticks = pss = 0
+    count = 0
+    for pid in launch_tree(root):
+        try:
+            cpu_ticks, _ = process_sample(pid)
+            pss_kib = process_pss_kib(pid)
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        ticks += cpu_ticks
+        pss += pss_kib
+        count += 1
+    if count < 2:
+        raise RuntimeError('roslaunch process tree is unexpectedly empty')
+    return ticks, pss, count
+
+
+def gpu_sample():
+    try:
+        output = subprocess.check_output(
+            ['nvidia-smi', '--query-gpu=memory.used,utilization.gpu',
+             '--format=csv,noheader,nounits'], stderr=subprocess.DEVNULL,
+            timeout=3.0).decode('utf-8').splitlines()[0]
+        used, utilization = (int(value.strip()) for value in output.split(',')[:2])
+        return {'used_mib': used, 'utilization_percent': utilization}
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError,
+            IndexError, subprocess.TimeoutExpired):
+        return None
+
+
 def matching_gzserver(world):
     token = os.path.basename(world)
     if not token.endswith('.world'):
@@ -48,21 +129,33 @@ def matching_gzserver(world):
     return matches[0]
 
 
-def measure(world, seconds):
+def measure(world, seconds, full_stack=False):
     if not 1.0 <= seconds <= 60.0:
         raise ValueError('sample duration must be 1..60 seconds')
     rospy.init_node('world_resource_probe', anonymous=True, disable_signals=True)
     rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
     properties = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
     pid = matching_gzserver(world)
+    root = launch_root(pid) if full_stack else None
     before = properties()
     if not before.success:
         raise RuntimeError(before.status_message)
     wall_start = time.monotonic()
+    gpu_start = gpu_sample()
     cpu_start, rss_start = process_sample(pid)
-    time.sleep(seconds)
+    if full_stack:
+        tree_cpu_start, tree_pss_start, tree_count_start = tree_sample(root)
+        tree_pss_peak = tree_pss_start
+        tree_count_peak = tree_count_start
+    while time.monotonic() - wall_start < seconds:
+        time.sleep(min(1.0, max(0.0, seconds - (time.monotonic() - wall_start))))
+        if full_stack:
+            _, sample_pss, sample_count = tree_sample(root)
+            tree_pss_peak = max(tree_pss_peak, sample_pss)
+            tree_count_peak = max(tree_count_peak, sample_count)
     after = properties()
     wall_end = time.monotonic()
+    gpu_end = gpu_sample()
     cpu_end, rss_end = process_sample(pid)
     if not after.success:
         raise RuntimeError(after.status_message)
@@ -70,7 +163,7 @@ def measure(world, seconds):
     sim_elapsed = after.sim_time - before.sim_time
     if sim_elapsed <= 0.0:
         raise RuntimeError('simulation clock did not advance')
-    return {
+    report = {
         'world': world,
         'sample_wall_s': round(wall_elapsed, 3),
         'sample_sim_s': round(sim_elapsed, 3),
@@ -82,13 +175,56 @@ def measure(world, seconds):
         'model_count': len(after.model_names),
         'gazebo_model_names': sorted(after.model_names),
         'host_cpu_count': os.cpu_count(),
-        'scope': 'Gazebo server with no PX4, lidar, or mission nodes',
+        'host_gpu_start': gpu_start,
+        'host_gpu_end': gpu_end,
+        'gpu_scope': ('Machine-wide NVIDIA sample, not attributed to the '
+                      'Gazebo launch tree'),
+        'scope': 'Gazebo server CPU/RSS only',
     }
+    if full_stack:
+        tree_cpu_end, tree_pss_end, tree_count_end = tree_sample(root)
+        report.update({
+            'roslaunch_pid': root,
+            'full_stack_cpu_cores': round(
+                (tree_cpu_end - tree_cpu_start) /
+                os.sysconf('SC_CLK_TCK') / wall_elapsed, 3),
+            'full_stack_pss_start_mib': round(tree_pss_start / 1024.0, 1),
+            'full_stack_pss_end_mib': round(tree_pss_end / 1024.0, 1),
+            'full_stack_pss_peak_sampled_mib': round(tree_pss_peak / 1024.0, 1),
+            'full_stack_process_count_peak': tree_count_peak,
+            'full_stack_process_count_end': tree_count_end,
+            'scope': ('One roslaunch process tree, including Gazebo, PX4, '
+                      'MAVROS, lidar and mission nodes; PSS avoids shared-page '
+                      'double counting; 1 s sampled memory peak'),
+        })
+    return report
+
+
+def evaluate_budget(report, budget):
+    if 'full_stack_pss_peak_sampled_mib' not in report:
+        raise ValueError('resource budget requires a full-stack sample')
+    checks = {
+        'real_time_factor': report['real_time_factor'] >= budget['minimum_real_time_factor'],
+        'full_stack_cpu_cores': report['full_stack_cpu_cores'] <= budget['maximum_cpu_cores'],
+        'full_stack_pss_peak_sampled_mib': (
+            report['full_stack_pss_peak_sampled_mib'] <=
+            budget['maximum_full_stack_pss_mib']),
+    }
+    return {'passed': all(checks.values()), 'checks': checks,
+            'budget': budget}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('world')
     parser.add_argument('--seconds', type=float, default=12.0)
+    parser.add_argument('--full-stack', action='store_true')
+    parser.add_argument('--budget', help='predeclared JSON budget for full-stack trials')
     args = parser.parse_args()
-    print(json.dumps(measure(args.world, args.seconds), indent=2))
+    report = measure(args.world, args.seconds, args.full_stack)
+    if args.budget:
+        with open(args.budget, encoding='utf-8') as stream:
+            budget = json.load(stream)
+        report['acceptance'] = evaluate_budget(report, budget)
+    print(json.dumps(report, indent=2))
+    raise SystemExit(0 if report.get('acceptance', {}).get('passed', True) else 1)

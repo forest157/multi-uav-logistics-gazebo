@@ -2,7 +2,8 @@ import unittest
 from pathlib import Path
 
 from logistics_gazebo_sim.pointcloud_perception import exclude_mapped_static
-from logistics_gazebo_sim.static_world_map import static_primitives_for_world
+from logistics_gazebo_sim.static_world_map import (primitive_distance,
+                                                   static_primitives_for_world)
 from logistics_gazebo_sim.worlds import OUTDOOR_LAYOUTS
 
 
@@ -35,6 +36,15 @@ class StaticWorldMapTest(unittest.TestCase):
                        {'outdoor_world': 'unknown', 'world_dir': str(world_dir)}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 static_primitives_for_world(**kwargs)
+
+    def test_metric_distance_to_box_and_cylinder(self):
+        box = {'kind': 'box', 'x': 10.0, 'y': 20.0,
+               'half_x': 2.0, 'half_y': 3.0, 'height': 8.0}
+        self.assertEqual(primitive_distance((10, 20, 4), box), 0.0)
+        self.assertAlmostEqual(primitive_distance((13, 20, 10), box), 5 ** 0.5)
+        cylinder = {'kind': 'cylinder', 'x': 0.0, 'y': 0.0,
+                    'radius': 2.0, 'height': 5.0}
+        self.assertAlmostEqual(primitive_distance((5, 0, 9), cylinder), 5.0)
 
 
 if __name__ == '__main__':

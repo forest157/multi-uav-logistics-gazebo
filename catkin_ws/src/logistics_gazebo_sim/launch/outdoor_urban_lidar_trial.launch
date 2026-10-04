@@ -1,0 +1,26 @@
+<launch>
+  <!-- Manual outdoor full-stack trial; explicitly start after preflight. -->
+  <arg name="gui" default="true"/>
+  <arg name="gazebo_master_uri" default="http://127.0.0.1:11470"/>
+  <arg name="dynamic_obstacle_config" default="$(find logistics_gazebo_sim)/config/dynamic_obstacles_none.yaml"/>
+  <include file="$(find logistics_gazebo_sim)/launch/three_uav_mission.launch">
+    <arg name="outdoor_world" value="outdoor_urban"/>
+    <arg name="world_name" value="$(find logistics_gazebo_sim)/worlds/outdoor_urban.world"/>
+    <arg name="mission_config" value="$(find logistics_gazebo_sim)/config/mission_outdoor_urban.yaml"/>
+    <arg name="spawn_x" value="-75.0"/>
+    <arg name="spawn_y" value="-95.0"/>
+    <arg name="spawn_spacing_m" value="15.0"/>
+    <arg name="goal_x" value="90.0"/>
+    <arg name="goal_y" value="95.0"/>
+    <arg name="target_z" value="33.0"/>
+    <arg name="auto_start" value="false"/>
+    <arg name="dynamic_obstacles" value="true"/>
+    <arg name="dynamic_state_source" value="lidar"/>
+    <arg name="dynamic_avoidance_execution" value="true"/>
+    <arg name="local_avoidance_algorithm" value="orca3d"/>
+    <arg name="orca_control_mode" value="limited"/>
+    <arg name="dynamic_obstacle_config" value="$(arg dynamic_obstacle_config)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="gazebo_master_uri" value="$(arg gazebo_master_uri)"/>
+  </include>
+</launch>

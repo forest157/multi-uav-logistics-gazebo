@@ -5,6 +5,14 @@
 !/README.md
 !/ROADMAP.md
 
+!/docs/
+/docs/*
+!/docs/SIMULATION_GALLERY.md
+!/docs/images/
+/docs/images/*
+!/docs/images/outdoor_campus_wide_oct04.jpg
+!/docs/images/outdoor_campus_home_oct04.jpg
+
 !/catkin_ws/
 /catkin_ws/*
 !/catkin_ws/src/

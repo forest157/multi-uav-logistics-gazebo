@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-04",
+  "scope": "Three-UAV complete delivery and return, PX4 SITL, physical lidar, dynamic-risk/ORCA limited, safety and energy nodes; no birds. Offline sampled Gazebo truth only for acceptance.",
+  "criteria": {
+    "minimum_fleet_separation_m": 3.0,
+    "minimum_static_clearance_m": 0.0,
+    "maximum_estimate_error_m": 1.0,
+    "maximum_settled_vertical_error_m": 1.0,
+    "no_false_lidar_targets_or_avoidance": true,
+    "mission_complete_and_all_disarmed": true
+  },
+  "worlds": {
+    "outdoor_campus": {
+      "capture": "/tmp/outdoor_campus_allup_oct04.jsonl",
+      "flight_samples": 3965,
+      "minimum_fleet_separation_m": 3.255362099379534,
+      "minimum_static_clearance_m": 1.6115728653879466,
+      "maximum_estimate_error_m": 0.6510781204290539,
+      "maximum_settled_vertical_error_m": 0.4762972460726722,
+      "passed": true
+    },
+    "outdoor_residential": {
+      "capture": "/tmp/outdoor_residential_allup_oct04.jsonl",
+      "flight_samples": 4069,
+      "minimum_fleet_separation_m": 3.2789303827691874,
+      "minimum_static_clearance_m": 1.790995704130353,
+      "maximum_estimate_error_m": 0.7252069590296197,
+      "maximum_settled_vertical_error_m": 0.5026636878660966,
+      "passed": true
+    },
+    "outdoor_urban": {
+      "capture": "/tmp/outdoor_urban_allup_oct04.jsonl",
+      "flight_samples": 5839,
+      "minimum_fleet_separation_m": 3.3199616769975173,
+      "minimum_static_clearance_m": 1.5548693936485265,
+      "maximum_estimate_error_m": 0.8754347363212744,
+      "maximum_settled_vertical_error_m": 0.5134620217112911,
+      "passed": true
+    }
+  },
+  "common_results": {
+    "truth_lidar_and_safety_coverage_fraction": 1.0,
+    "maximum_lidar_confirmed_targets": 0,
+    "unexpected_avoidance_samples": 0,
+    "safety_error_samples": 0,
+    "mission_complete": true,
+    "all_disarmed": true
+  },
+  "limitations": "One complete run per world. Sphere-envelope clearance at sampled truth times, not a continuous contact-sensor proof. Single-bird closed-loop validation was performed in outdoor_campus only. Full-stack resource thresholds, outdoor imported-world acceptance, and user visual review remain pending."
+}

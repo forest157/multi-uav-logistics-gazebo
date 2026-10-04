@@ -40,6 +40,17 @@ class MissionPlayer:
     def __init__(self):
         default=os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim"),"config","mission_scene0.yaml")
         with open(rospy.get_param("~config",default),"r",encoding="utf-8") as stream:self.cfg=yaml.safe_load(stream)
+        outdoor_world=rospy.get_param("~outdoor_world",None)
+        if outdoor_world:
+            from logistics_gazebo_sim.outdoor_mission import verify_outdoor_mission_config
+            package=rospkg.RosPack().get_path("logistics_gazebo_sim")
+            verify_outdoor_mission_config(
+                self.cfg,outdoor_world,os.path.join(package,"worlds"),
+                rospy.get_param("~world_file"),
+                rospy.get_param("~spawn_x"),rospy.get_param("~spawn_y"),
+                rospy.get_param("~spawn_spacing_m"),
+                rospy.get_param("~goal_x"),rospy.get_param("~goal_y"),
+                rospy.get_param("~target_z"))
         self.count=int(self.cfg["vehicle_count"])
         formation_cfg=self.cfg.get("formation",{})
         required=float(formation_cfg.get("minimum_separation_m",3.0))

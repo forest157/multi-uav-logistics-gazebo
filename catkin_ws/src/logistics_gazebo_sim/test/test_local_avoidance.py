@@ -13,6 +13,17 @@ class LocalAvoidanceTest(unittest.TestCase):
         self.assertIn('"required_clearance":self.orca_required_clearance',source)
         self.assertIn("required_clearance=self.orca_required_clearance",source)
 
+    def test_orca_outdoor_static_gate_uses_metric_bounds(self):
+        planner=Orca3DPlanner()
+        clear=planner.plan([[[0,60,65,19],[4,64,65,19]]],[],
+                           scene_id='outdoor_campus',max_speed=3.0)
+        self.assertTrue(clear['viable'],clear)
+        boundary=planner.plan([[[0,89,0,19],[4,90,0,19]]],[],
+                              scene_id='outdoor_campus',max_speed=3.0)
+        self.assertFalse(boundary['viable'])
+        self.assertEqual(boundary['static_validation']['error_code'],
+                         'E_BOUNDARY')
+
     def test_complete_acceleration_ramp_is_validated_before_first_slew_step(self):
         gate=OrcaCommandGate(1)
         bird=dict(id="bird",position=[0,12,8],velocity=[0,-3,0],radius=.75,height=1.5)

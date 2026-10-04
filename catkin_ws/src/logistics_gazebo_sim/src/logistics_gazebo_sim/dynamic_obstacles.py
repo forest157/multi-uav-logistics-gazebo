@@ -361,6 +361,29 @@ def collective_avoidance_candidates(paths, lateral=3.5, vertical=3.0):
 def validate_static_paths(scene_id, paths):
     """Validate actual vehicle xyz paths against scene geometry and limits."""
     from logistics_gazebo_sim.clearance_analyzer import analyze_path
+    if isinstance(scene_id, str) and scene_id.startswith('outdoor_'):
+        import os
+        import rospkg
+        from logistics_gazebo_sim.outdoor_world_profile import (check_cruise_route,
+                                                                 load_outdoor_profile)
+        world_dir=os.path.join(rospkg.RosPack().get_path('logistics_gazebo_sim'),
+                               'worlds')
+        profile=load_outdoor_profile(scene_id,world_dir)
+        reports=[]
+        for index,path in enumerate(paths):
+            xyz=np.asarray(path,dtype=float)[:,1:]
+            report=check_cruise_route(profile,xyz,1.2,0.6,0.6)
+            report['vehicle_id']='uav{}'.format(index)
+            report['message']=('clear' if report['feasible'] else
+                               'outdoor static route violates '+report['error_code'])
+            reports.append(report)
+        failed=next((value for value in reports if not value['feasible']),None)
+        return {'feasible':failed is None,
+                'error_code':None if failed is None else failed['error_code'],
+                'message':'all vehicle paths satisfy static constraints' if failed is None else failed['message'],
+                'vehicle_id':None if failed is None else failed['vehicle_id'],
+                'obstacle':None if failed is None else failed.get('obstacle'),
+                'reports':reports}
     reports=[]
     for index,path in enumerate(paths):
         xyz=np.asarray(path,dtype=float)[:,1:]

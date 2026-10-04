@@ -1,0 +1,29 @@
+<launch>
+  <!-- Manual, no-bird outdoor integration trial. Never auto-arms. -->
+  <arg name="gui" default="true"/>
+  <arg name="gazebo_master_uri" default="http://127.0.0.1:11470"/>
+  <include file="$(find logistics_gazebo_sim)/launch/three_uav_mission.launch">
+    <arg name="outdoor_world" value="outdoor_campus"/>
+    <arg name="world_name" value="$(find logistics_gazebo_sim)/worlds/outdoor_campus.world"/>
+    <arg name="mission_config" value="$(find logistics_gazebo_sim)/config/mission_outdoor_campus.yaml"/>
+    <arg name="spawn_x" value="-45.0"/>
+    <arg name="spawn_y" value="-65.0"/>
+    <arg name="spawn_spacing_m" value="15.0"/>
+    <arg name="goal_x" value="60.0"/>
+    <arg name="goal_y" value="65.0"/>
+    <arg name="target_z" value="19.0"/>
+    <arg name="auto_start" value="false"/>
+    <arg name="dynamic_obstacles" value="false"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="gazebo_master_uri" value="$(arg gazebo_master_uri)"/>
+  </include>
+  <node pkg="logistics_gazebo_sim" type="lidar_dynamic_detector"
+        name="outdoor_lidar_dynamic_detector" output="screen">
+    <param name="outdoor_world" value="outdoor_campus"/>
+    <param name="vehicle_count" value="3"/>
+    <param name="spawn_x" value="-45.0"/>
+    <param name="spawn_y" value="-65.0"/>
+    <param name="spawn_spacing_m" value="15.0"/>
+    <param name="static_map_margin_m" value="1.5"/>
+  </node>
+</launch>
