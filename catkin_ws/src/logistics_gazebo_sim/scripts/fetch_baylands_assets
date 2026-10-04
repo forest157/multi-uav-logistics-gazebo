@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Open Robotics Fuel Baylands model v3, CC BY 4.0. Keep the large meshes out
+# of Git; the digest makes a changed upstream "latest" download fail closed.
+digest=a6576c36823b61566b408a8cee2df97e9c926c3a004f1be6855680ace67f8f9b
+url=https://fuel.gazebosim.org/1.0/OpenRobotics/models/baylands.zip
+cache_root="${1:-/home/devuser/.cache/logistics_worlds}"
+mkdir -p "$cache_root"
+staging=$(mktemp -d "$cache_root/baylands_v3.XXXXXXXX")
+curl -fL --retry 2 "$url" -o "$staging/source.zip"
+printf '%s  %s\n' "$digest" "$staging/source.zip" | sha256sum -c -
+mkdir "$staging/baylands"
+unzip -q "$staging/source.zip" -d "$staging/baylands"
+test -f "$staging/baylands/model.sdf"
+test -f "$staging/baylands/model.config"
+test -f "$staging/baylands/media/baylands_01.DAE"
+test -f "$staging/baylands/media/baylands_02.DAE"
+test -f "$staging/baylands/media/baylands_03.DAE"
+printf 'ASSET_ROOT=%s\n' "$staging/baylands"
+printf 'GAZEBO_MODEL_PATH=%s\n' "$staging"
+printf 'WORLD=%s\n' /home/devuser/PX4_Firmware/Tools/sitl_gazebo/worlds/baylands.world

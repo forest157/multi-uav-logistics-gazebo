@@ -1,0 +1,13 @@
+frame_id: map
+rate_hz: 40.0
+obstacles:
+  - id: bird_crossing_outdoor_0
+    start: [-60.0, 0.0, 19.0]
+    end: [60.0, 0.0, 19.0]
+    speed_mps: 4.0
+    radius_m: 0.75
+    height_m: 0.8
+    phase_s: 0.0
+    bob_amplitude_m: 0.0
+    bob_period_s: 2.4
+    colour: "0.12 0.16 0.20 1"

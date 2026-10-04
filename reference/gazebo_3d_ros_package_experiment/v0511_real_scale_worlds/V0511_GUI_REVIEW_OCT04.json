@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-04",
+  "world": "outdoor_campus",
+  "scenario": "visible Gazebo GUI, three PX4 UAVs, physical lidar, ORCA limited, no birds, full delivery and return",
+  "capture": "/tmp/outdoor_campus_gui_review_oct04.jsonl",
+  "audit": "/tmp/outdoor_campus_gui_review_audit_oct04.json",
+  "flight_samples": 3965,
+  "valid_truth_samples": 3965,
+  "fresh_lidar_samples": 3965,
+  "fresh_safety_samples": 3965,
+  "minimum_truth_separation_m": 3.284664985616169,
+  "minimum_truth_static_clearance_m": 1.617944351077986,
+  "maximum_estimate_error_m": 0.6279181086415458,
+  "maximum_settled_vertical_error_m": 0.5042648981461504,
+  "maximum_lidar_confirmed_targets": 0,
+  "unexpected_avoidance_samples": 0,
+  "safety_error_samples": 0,
+  "complete": true,
+  "disarmed": true,
+  "passed": true,
+  "gui_active_cruise_resource_window": {
+    "sample_wall_s": 30.032,
+    "real_time_factor": 0.871,
+    "full_stack_cpu_cores": 1.726,
+    "full_stack_pss_peak_sampled_mib": 7521.4,
+    "host_gpu_memory_used_mib": 615,
+    "gpu_scope": "machine-wide, not attributable to the simulator"
+  },
+  "scope": "One complete visible run; independent sampled Gazebo truth with conservative sphere envelopes. GUI resource window is observational, not a separately predeclared performance acceptance gate.",
+  "release_status": "local candidate for user visual review; no push or tag"
+}

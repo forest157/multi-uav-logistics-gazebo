@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-17",
+  "branch": "feature/v0511-real-scale-worlds",
+  "scenario": "scene_0, three UAVs, physical lidar, one crossing bird, ORCA limited execution",
+  "source_capture": "/tmp/orca_recovery2_sep17.jsonl",
+  "source_capture_committed": false,
+  "samples": 3107,
+  "valid_truth_samples": 3107,
+  "minimum_bird_envelope_clearance_m": 2.5539032596077424,
+  "minimum_fleet_separation_m": 3.179473676218753,
+  "maximum_estimate_error_m": 0.5460287189897015,
+  "mission_elapsed_s": 284.46,
+  "complete": true,
+  "disarmed": true,
+  "passed": true,
+  "criteria": {
+    "minimum_fleet_separation_m": 3.0,
+    "minimum_bird_envelope_clearance_m": 0.0,
+    "maximum_estimate_error_m": 1.0,
+    "truth_max_receipt_age_s": 0.2
+  },
+  "scope": "Conservative sampled truth sphere envelopes; not a contact-sensor proof or a substitute for the remaining no-bird, dropout, head-on and formation matrix."
+}

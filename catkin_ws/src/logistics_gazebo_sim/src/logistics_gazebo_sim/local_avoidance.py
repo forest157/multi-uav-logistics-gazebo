@@ -1,6 +1,8 @@
 """Pluggable local avoidance algorithms for scalable 3D fleets."""
 import math
+import heapq
 import multiprocessing as mp
+import threading
 import time
 import warnings
 import numpy as np
@@ -25,7 +27,14 @@ def _clamp(vector, limit):
 
 
 class OrcaCommandGate:
-    """Fail-closed conditioning for ORCA velocity commands before flight use."""
+    """Fail-closed validation and rate limiting for ORCA flight commands.
+
+    The planner velocity is an eventual target. Safety is checked against the
+    complete measured-velocity-to-target acceleration ramp, while ``current``
+    emits that ramp at control-loop rate. Treating the first small slew step as
+    a velocity held for the whole prediction horizon can turn a valid sidestep
+    into an unsafe hover in front of an incoming obstacle.
+    """
     def __init__(self, vehicle_count, max_speed=2.0, max_climb_rate=0.8,
                  max_acceleration=1.0, smoothing=0.35, timeout=0.6):
         self.vehicle_count=int(vehicle_count);self.max_speed=float(max_speed)
@@ -35,15 +44,175 @@ class OrcaCommandGate:
             raise DynamicObstacleError("ORCA command limits must be positive")
         if not 0.0<self.smoothing<=1.0:
             raise DynamicObstacleError("ORCA smoothing must be in (0,1]")
+        self._lock=threading.RLock()
         self.reset()
     def reset(self):
-        self.previous=[None for _ in range(self.vehicle_count)]
-    def condition(self, plan, now, dt):
-        if not isinstance(plan,dict) or not plan.get("viable"):
+        with self._lock:
+            self.current_velocities=None
+            self.target_velocities=None
+            self.last_output_time=None
+            self.valid_until=None
+    def _bounded_commands(self, commands):
+        by_id={item.get("vehicle_id"):item for item in commands if isinstance(item,dict)}
+        expected={"uav{}".format(index) for index in range(self.vehicle_count)}
+        if set(by_id)!=expected:
+            raise DynamicObstacleError("ORCA command vehicle ids mismatch")
+        desired=[];preferred=[]
+        for index in range(self.vehicle_count):
+            item=by_id["uav{}".format(index)]
+            target=_clamp(_vector(item.get("velocity"),"ORCA velocity"),self.max_speed)
+            target[2]=max(-self.max_climb_rate,min(self.max_climb_rate,target[2]))
+            base=_clamp(_vector(item.get("preferred_velocity"),"ORCA preferred velocity"),self.max_speed)
+            base[2]=max(-self.max_climb_rate,min(self.max_climb_rate,base[2]))
+            desired.append(target);preferred.append(base)
+        return desired,preferred
+    def _safe_target(self, desired, context, now):
+        obstacles=bool(context.get("obstacles"))
+        vertical_errors=context.get("nominal_vertical_errors")
+        vertical_recovery=(not obstacles and isinstance(vertical_errors,(list,tuple))
+                           and len(vertical_errors)==self.vehicle_count
+                           and all(np.isfinite(float(value)) for value in vertical_errors)
+                           and max(abs(float(value)) for value in vertical_errors)>0.8)
+        full_candidates=[]
+        if self.target_velocities is not None:
+            full_candidates.append([old+self.smoothing*(new-old)
+                                    for old,new in zip(self.target_velocities,desired)])
+        full_candidates.append(desired)
+        # While tracking an obstacle, prefer level-flight solutions whenever
+        # independently safe. This prevents lidar centroid height noise from
+        # becoming an unexplained climb/descent avoidance command. Once tracks
+        # clear, a validated vertical target may return to the nominal route.
+        candidates=[];prefer_horizontal=obstacles
+        for candidate in full_candidates:
+            horizontal=[np.asarray([value[0],value[1],0.],dtype=float)
+                        for value in candidate]
+            if not obstacles and not vertical_recovery:
+                candidates.append(horizontal)
+            else:
+                candidates.extend((horizontal,candidate) if prefer_horizontal
+                                  else (candidate,horizontal))
+        for candidate in candidates:
+            if validate_orca_execution(candidate,context,now,self.max_acceleration):
+                return [np.asarray(value,dtype=float) for value in candidate]
+        # Search coherent horizontal maneuvers only after the planner target
+        # fails. A shared correction preserves formation and deliberately
+        # avoids inventing a vertical response to lidar noise.
+        alternatives=[]
+        horizontal_desired=[np.asarray([value[0],value[1],0.],dtype=float)
+                            for value in desired]
+        speeds=np.linspace(0.5,self.max_speed,max(1,int(math.ceil(self.max_speed/0.5))))
+        for angle in np.linspace(0.,2.*math.pi,16,endpoint=False):
+            direction=np.asarray([math.cos(angle),math.sin(angle),0.])
+            for speed in speeds:
+                common=direction*speed
+                alternatives.append([_clamp(value+common,self.max_speed)
+                                     for value in horizontal_desired])
+                alternatives.append([common.copy() for _ in desired])
+        alternatives.sort(key=lambda values:sum(float(np.sum((value-target)**2))
+                                                   for value,target in zip(values,horizontal_desired)))
+        selected=next((values for values in alternatives
+                       if validate_orca_execution(values,context,now,self.max_acceleration)),None)
+        if selected is None:
+            selected=self._independent_emergency_target(
+                horizontal_desired,context,now)
+        if selected is None:
+            raise DynamicObstacleError("conditioned ORCA trajectory is unsafe")
+        return [np.asarray(value,dtype=float) for value in selected]
+    def _independent_emergency_target(self, desired, context, now):
+        """Find a validated per-vehicle horizontal escape when a common one cannot.
+
+        A crossing obstacle can threaten successive members of a formation, so
+        forcing every aircraft to use the same fallback velocity may have no
+        solution even though a safe split maneuver exists. Each candidate is
+        first checked for that aircraft, then complete combinations are checked
+        for fleet separation and static-map clearance. The bounded best-first
+        search keeps this exceptional path deterministic and finite.
+        """
+        if self.vehicle_count<=1:return None
+        positions=context.get("positions",[]);measured=context.get("velocities",[])
+        if len(positions)!=self.vehicle_count or len(measured)!=self.vehicle_count:
+            raise DynamicObstacleError("ORCA execution context count mismatch")
+        directions=[np.asarray([math.cos(angle),math.sin(angle),0.],dtype=float)
+                    for angle in np.linspace(0.,2.*math.pi,72,endpoint=False)]
+        pools=[]
+        for index,target in enumerate(desired):
+            subset=dict(context,positions=[positions[index]],
+                        velocities=[measured[index]])
+            raw=[np.asarray(target,dtype=float)]+[
+                direction*self.max_speed for direction in directions]
+            unique=[];seen=set()
+            for value in raw:
+                key=tuple(round(float(axis),6) for axis in value)
+                if key in seen:continue
+                seen.add(key)
+                if validate_orca_execution([value],subset,now,
+                                           self.max_acceleration):
+                    unique.append(value)
+            if not unique:return None
+            unique.sort(key=lambda value:float(np.sum((value-target)**2)))
+            pools.append(unique)
+        start=tuple(0 for _ in pools);queue=[(0.0,start)];visited={start}
+        checks=0
+        while queue and checks<512:
+            _score,indices=heapq.heappop(queue)
+            values=[pools[i][index] for i,index in enumerate(indices)]
+            checks+=1
+            if validate_orca_execution(values,context,now,self.max_acceleration):
+                return values
+            for axis in range(len(indices)):
+                if indices[axis]+1>=len(pools[axis]):continue
+                updated=list(indices);updated[axis]+=1;updated=tuple(updated)
+                if updated in visited:continue
+                visited.add(updated)
+                score=sum(float(np.sum((pools[i][index]-desired[i])**2))
+                          for i,index in enumerate(updated))
+                heapq.heappush(queue,(score,updated))
+        return None
+    def _emit_locked(self, now):
+        now=float(now)
+        if self.current_velocities is None or self.target_velocities is None:
+            raise DynamicObstacleError("ORCA command is unavailable")
+        if self.valid_until is None or now>self.valid_until:
+            raise DynamicObstacleError("ORCA command expired during execution")
+        if self.last_output_time is None:self.last_output_time=now
+        dt=max(0.0,now-self.last_output_time)
+        for index,(current,target) in enumerate(zip(self.current_velocities,self.target_velocities)):
+            updated=current+_clamp(target-current,self.max_acceleration*dt)
+            updated=_clamp(updated,self.max_speed)
+            updated[2]=max(-self.max_climb_rate,min(self.max_climb_rate,updated[2]))
+            self.current_velocities[index]=updated
+        self.last_output_time=now
+        return [tuple(float(axis) for axis in value) for value in self.current_velocities]
+    def current(self, now):
+        """Return the next acceleration-bounded command for the control loop."""
+        with self._lock:return self._emit_locked(now)
+    def refresh(self, safety_context, now):
+        """Revalidate a cached target against the newest sensor estimates."""
+        with self._lock:
+            if self.target_velocities is None:
+                raise DynamicObstacleError("ORCA command is unavailable")
+            vertical_errors=safety_context.get("nominal_vertical_errors")
+            if (not safety_context.get("obstacles") and
+                    isinstance(vertical_errors,(list,tuple)) and
+                    len(vertical_errors)==self.vehicle_count and
+                    all(np.isfinite(float(value)) and abs(float(value))<=0.8
+                        for value in vertical_errors)):
+                horizontal=[np.asarray([value[0],value[1],0.],dtype=float)
+                            for value in self.target_velocities]
+                if validate_orca_execution(horizontal,safety_context,now,
+                                           self.max_acceleration):
+                    self.target_velocities=horizontal
+            if not validate_orca_execution(self.target_velocities,safety_context,now,
+                                           self.max_acceleration):
+                raise DynamicObstacleError("cached ORCA trajectory is unsafe")
+            self.valid_until=float(now)+self.timeout
+            return self._emit_locked(now)
+    def condition(self, plan, now, dt, safety_context=None):
+        if not isinstance(plan,dict) or (not plan.get("viable") and safety_context is None):
             raise DynamicObstacleError("ORCA plan is not viable")
         if plan.get("contract_version")!="orca_velocity_v1" or plan.get("algorithm")!="orca3d" or plan.get("command_type")!="per_vehicle_velocity":
             raise DynamicObstacleError("unexpected ORCA command contract")
-        if not plan.get("constraints_satisfied") or not (plan.get("static_validation") or {}).get("feasible"):
+        if safety_context is None and (not plan.get("constraints_satisfied") or not (plan.get("static_validation") or {}).get("feasible")):
             raise DynamicObstacleError("ORCA command lacks independent safety validation")
         stamp=float(plan.get("stamp",-1.0))
         age=float(now)-stamp
@@ -53,25 +222,83 @@ class OrcaCommandGate:
         commands=plan.get("commands")
         if not isinstance(commands,list) or len(commands)!=self.vehicle_count:
             raise DynamicObstacleError("ORCA command vehicle count mismatch")
-        by_id={item.get("vehicle_id"):item for item in commands if isinstance(item,dict)}
-        expected={"uav{}".format(index) for index in range(self.vehicle_count)}
-        if set(by_id)!=expected:
-            raise DynamicObstacleError("ORCA command vehicle ids mismatch")
-        step=max(1e-3,float(dt));result=[]
-        for index in range(self.vehicle_count):
-            item=by_id["uav{}".format(index)]
-            desired=_clamp(_vector(item.get("velocity"),"ORCA velocity"),self.max_speed)
-            desired[2]=max(-self.max_climb_rate,min(self.max_climb_rate,desired[2]))
-            if self.previous[index] is None:
-                preferred=_clamp(_vector(item.get("preferred_velocity"),"ORCA preferred velocity"),self.max_speed)
-                preferred[2]=max(-self.max_climb_rate,min(self.max_climb_rate,preferred[2]))
-                self.previous[index]=preferred
-            delta=_clamp(desired-self.previous[index],self.max_acceleration*step)
-            limited=self.previous[index]+delta
-            filtered=self.previous[index]+self.smoothing*(limited-self.previous[index])
-            self.previous[index]=filtered
-            result.append(tuple(float(value) for value in filtered))
-        return result
+        desired,preferred=self._bounded_commands(commands)
+        with self._lock:
+            target=(self._safe_target(desired,safety_context,now)
+                    if safety_context is not None else desired)
+            if self.current_velocities is None:
+                initial=(safety_context or {}).get("velocities",preferred)
+                if len(initial)!=self.vehicle_count:
+                    raise DynamicObstacleError("ORCA execution velocity count mismatch")
+                self.current_velocities=[]
+                for value in initial:
+                    bounded=_clamp(_vector(value,"measured velocity"),self.max_speed)
+                    bounded[2]=max(-self.max_climb_rate,min(self.max_climb_rate,bounded[2]))
+                    self.current_velocities.append(bounded)
+                self.last_output_time=float(now)
+            self.target_velocities=[np.asarray(value,dtype=float) for value in target]
+            # A fresh context validation can safely bridge planner latency, but
+            # never beyond the gate timeout without another sensor recheck.
+            self.valid_until=(float(now)+self.timeout if safety_context is not None
+                              else stamp+validity)
+            return self._emit_locked(now)
+
+
+def validate_orca_execution(velocities, context, now, max_acceleration=1.0):
+    """Recheck bounded commands with measured motion and a delayed acceleration ramp.
+
+    Truth must never enter this context: use timestamped fleet estimates and
+    sensor tracks. Segment closest approach catches between-sample crossings.
+    """
+    required_fields={"stamp","positions","velocities","obstacles"}
+    if not isinstance(context,dict) or not required_fields.issubset(context):
+        raise DynamicObstacleError("ORCA execution context is incomplete")
+    age=float(now)-float(context["stamp"])
+    if not math.isfinite(age) or not 0.0<=age<=0.5:
+        raise DynamicObstacleError("ORCA execution context is stale")
+    positions=np.asarray([_vector(p,"execution position") for p in context["positions"]])
+    measured=np.asarray([_vector(v,"measured velocity") for v in context["velocities"]])
+    commands=np.asarray([_vector(v,"execution velocity") for v in velocities])
+    if positions.shape!=commands.shape or measured.shape!=commands.shape:
+        raise DynamicObstacleError("ORCA execution context count mismatch")
+    obstacles=[validate_obstacle(o) for o in context["obstacles"]]
+    for obstacle in obstacles:
+        _vector(obstacle["position"],"obstacle position");_vector(obstacle["velocity"],"obstacle velocity")
+        if not math.isfinite(obstacle["radius"]) or not math.isfinite(obstacle["height"]):
+            raise DynamicObstacleError("obstacle dimensions must be finite")
+    horizon=float(context.get("horizon",8.0));delay=float(context.get("control_delay",0.6))
+    if not math.isfinite(horizon) or not 0.0<horizon<=10.0 or not 0.0<=delay<=2.0:
+        raise DynamicObstacleError("invalid ORCA execution horizon")
+    count=max(2,int(math.ceil(horizon/0.1)));dt=horizon/count
+    positions=positions+age*measured
+    path=[positions.copy()];motion=measured.copy()
+    for k in range(count):
+        next_motion=motion.copy()
+        if k*dt>=delay:
+            for i in range(len(commands)):
+                next_motion[i]+=_clamp(commands[i]-motion[i],max_acceleration*dt)
+        positions=positions+0.5*(motion+next_motion)*dt
+        path.append(positions.copy());motion=next_motion
+    path=np.asarray(path);times=np.arange(count+1)*dt
+    def closest(relative):
+        start=relative[:-1];delta=np.diff(relative,axis=0)
+        fraction=np.clip(-np.sum(start*delta,axis=1)/np.maximum(1e-12,np.sum(delta*delta,axis=1)),0.,1.)
+        return float(np.min(np.linalg.norm(start+fraction[:,None]*delta,axis=1)))
+    required_clearance=float(context.get("required_clearance",.1))
+    if not math.isfinite(required_clearance) or required_clearance<0.0:
+        raise DynamicObstacleError("invalid ORCA required clearance")
+    for i in range(len(commands)):
+        for j in range(i):
+            if closest(path[:,i]-path[:,j])<float(context.get("minimum_separation",3.0))+0.1:return False
+        for obstacle in obstacles:
+            future=obstacle["position"]+(times+age)[:,None]*obstacle["velocity"]
+            required=1.2+max(obstacle["radius"],0.5*obstacle["height"])+0.5+required_clearance
+            if closest(path[:,i]-future)<required:return False
+    scene=context.get("scene_id")
+    if scene is not None:
+        paths=[np.column_stack((times,path[:,i])).tolist() for i in range(len(commands))]
+        if not validate_static_paths(scene,paths)["feasible"]:return False
+    return True
 
 
 def orca_position_targets(poses, velocities, horizon):

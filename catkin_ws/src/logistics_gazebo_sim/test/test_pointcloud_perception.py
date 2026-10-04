@@ -3,6 +3,23 @@ from logistics_gazebo_sim.pointcloud_perception import DetectionAssociator,Voxel
 
 
 class PointCloudPerceptionTest(unittest.TestCase):
+    def test_repeated_moving_target_is_not_absorbed_into_background(self):
+        model=VoxelBackground(voxel_size=.45,background_hits=4)
+        wall=(20.,20.,5.)
+        # Each revisit occurs within the old forget window; the wall persists.
+        for frame in range(40):
+            moving=(float(frame%8),0.,5.)
+            candidates=model.update([wall,moving])
+            self.assertIn(moving,candidates)
+            if frame>=4:self.assertNotIn(wall,candidates)
+
+    def test_reappearing_surface_requires_new_persistence(self):
+        model=VoxelBackground(voxel_size=1,background_hits=2)
+        point=(2,2,2)
+        model.update([point]);model.update([point])
+        self.assertEqual(model.update([point]),[])
+        model.update([])
+        self.assertEqual(model.update([point]),[point])
     def test_confidence_combines_point_support_and_motion(self):
         self.assertEqual(calibrated_detection_confidence({"point_count":30},3,4),1.0)
         self.assertAlmostEqual(calibrated_detection_confidence({"point_count":15},0,4),.325)
@@ -13,6 +30,8 @@ class PointCloudPerceptionTest(unittest.TestCase):
 
     def test_vehicle_exclusion(self):
         self.assertEqual(exclude_near_vehicles([(0,0,0),(3,0,0)],[(0,0,0)],1.0),[(3.0,0.0,0.0)])
+        # Include rotor-tip echoes in the peer-body mask.
+        self.assertEqual(exclude_near_vehicles([(1.4,0,0),(1.9,0,0)],[(0,0,0)],1.8),[(1.9,0.0,0.0)])
     def test_static_voxel_becomes_background(self):
         model=VoxelBackground(voxel_size=1,background_hits=2)
         self.assertEqual(len(model.update([(2,2,2)])),1);self.assertEqual(len(model.update([(2,2,2)])),1)
@@ -52,6 +71,22 @@ class PointCloudPerceptionTest(unittest.TestCase):
         model.update([],0.8);model.update([],1.2)
         reacquired=model.update([{"position":[4.2,0,5]}],1.4)
         self.assertEqual(reacquired[0]["id"],identity)
+
+    def test_confirmed_target_rejects_single_scan_velocity_flip(self):
+        model=DetectionAssociator(confirmation_hits=3,minimum_speed=.8,
+                                  maximum_acceleration=5.0,maximum_track_age=1.5)
+        for index in range(4):
+            confirmed=model.update([{"position":[0,.6*index,5]}],.2*index)
+        identity=confirmed[0]["id"]
+        self.assertGreater(model.tracks[identity]["velocity"][1],2.5)
+        # The displaced centroid still fits the association radius, but its
+        # implied acceleration exceeds 40 m/s² and must not flip this track.
+        result=model.update([{"position":[0,.8,5]}],.8)
+        self.assertEqual(result,[])
+        self.assertGreater(model.tracks[identity]["velocity"][1],2.5)
+        self.assertEqual(model.tracks[identity]["misses"],1)
+        result=model.update([{"position":[0,3.0,5]}],1.0)
+        self.assertEqual(result[0]["id"],identity)
 
     def test_prediction_expires_id_after_occlusion_limit(self):
         model=DetectionAssociator(maximum_track_age=.5)

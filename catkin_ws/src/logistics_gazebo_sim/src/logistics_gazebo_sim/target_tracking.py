@@ -31,6 +31,8 @@ def validate_detection_payload(payload):
             "height": max(0.0, float(raw.get("height", 0.0))),
             "confidence": min(1.0, max(0.0, float(raw.get("confidence", 1.0)))),
         })
+        if "velocity_hint" in raw:
+            detections[-1]["velocity_hint"]=_vector3(raw["velocity_hint"],"velocity_hint")
     return {"stamp": stamp, "frame_id": str(payload.get("frame_id", "map")),
             "detections": detections}
 
@@ -70,7 +72,8 @@ class AlphaBetaTracker:
             identity = str(detection["id"]); measured = _vector3(detection["position"], "position")
             previous = self.tracks.get(identity)
             if previous is None or stamp <= previous["stamp"]:
-                position, velocity = measured, [0.0, 0.0, 0.0]
+                position=measured
+                velocity=_vector3(detection.get("velocity_hint",[0.0,0.0,0.0]),"velocity_hint")
             else:
                 dt = stamp-previous["stamp"]
                 predicted = [p+v*dt for p, v in zip(previous["position"], previous["velocity"])]

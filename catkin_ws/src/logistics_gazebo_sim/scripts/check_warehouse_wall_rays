@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Offline wall-cover regression against Gazebo physics rays (no flight approval)."""
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import numpy as np
+
+
+def first_box_hit(start, end, boxes):
+    start, end = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
+    direction = end - start
+    nearest = None
+    for lower, upper in boxes:
+        enter, leave = 0.0, 1.0
+        for axis in range(3):
+            if abs(direction[axis]) < 1e-12:
+                if not lower[axis] <= start[axis] <= upper[axis]:
+                    leave = -1.0
+                    break
+            else:
+                a = (lower[axis] - start[axis]) / direction[axis]
+                b = (upper[axis] - start[axis]) / direction[axis]
+                enter, leave = max(enter, min(a, b)), min(leave, max(a, b))
+        if enter <= leave:
+            distance = float(enter * np.linalg.norm(direction))
+            nearest = distance if nearest is None else min(nearest, distance)
+    return nearest
+
+
+def audit(geometry, probe, world):
+    wall = next(m for m in geometry['models'] if 'WallB' in m['name'])
+    boxes = wall['triangle_surface_boxes']
+    # Elevated below wall top, above shelves: isolate wall intersections.
+    rays = [([0, 0, z], end) for z in (7.0, 8.0)
+            for end in ([12, 0, z], [-12, 0, z], [0, 15, z], [0, -15, z])]
+    # Negative control: short segments entirely within the room.
+    rays += [([0, 0, 7], [1, 0, 7]), ([0, 0, 7], [0, 1, 7])]
+    payload = ''.join(' '.join(map(str, start + end)) + '\n' for start, end in rays)
+    result = subprocess.run([str(probe), str(world)], input=payload, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45, check=True)
+    observations = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
+    if len(observations) != len(rays):
+        raise ValueError('incorrect number of physics observations')
+    checks = []
+    for (start, end), observed in zip(rays, observations):
+        predicted = first_box_hit(start, end, boxes)
+        if predicted is None:
+            passed = not observed['entity']
+        else:
+            passed = wall['name'] in observed['entity'] and abs(predicted - observed['distance']) <= 1e-3
+        checks.append(dict(start=start, end=end, cover_distance_m=predicted,
+                           physics=observed, passed=bool(passed)))
+    return dict(passed=all(c['passed'] for c in checks), checks=checks,
+                scope='10 selected wall/empty-space rays only; no contact, clearance or flight certification',
+                world_sha256=geometry['world_sha256'])
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--geometry', type=Path, required=True)
+    parser.add_argument('--probe', type=Path, required=True)
+    parser.add_argument('--world', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    result = audit(json.loads(args.geometry.read_text()), args.probe, args.world)
+    args.output.write_text(json.dumps(result, indent=2) + '\n')
+    print('Wall physics ray checks: ' + ('PASS' if result['passed'] else 'FAIL'))
+    raise SystemExit(0 if result['passed'] else 1)

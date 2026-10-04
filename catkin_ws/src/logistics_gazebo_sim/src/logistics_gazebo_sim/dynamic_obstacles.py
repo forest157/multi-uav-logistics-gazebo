@@ -16,6 +16,37 @@ class DynamicObstacleError(ValueError):
     pass
 
 
+class ObstacleMemory:
+    """Bounded sensor-only prediction across a track disappearing from the feed."""
+    def __init__(self,maximum_age=4.0):
+        self.maximum_age=float(maximum_age);self.entries={};self.stamp=None
+
+    def update(self,obstacles,stamp):
+        stamp=float(stamp)
+        if not math.isfinite(stamp):raise DynamicObstacleError("obstacle memory stamp must be finite")
+        if self.stamp is not None and stamp<self.stamp:self.entries.clear()
+        self.stamp=stamp
+        for raw in obstacles:
+            item=validate_obstacle(raw)
+            age=float(raw.get("occluded_for_s",0.0))
+            if not math.isfinite(age) or age<0.:raise DynamicObstacleError("invalid obstacle occlusion age")
+            value=dict(raw,position=item["position"].tolist(),velocity=item["velocity"].tolist())
+            self.entries[item["id"]]=(stamp,stamp-age,value)
+        result=[]
+        for identity,(updated,observed,item) in list(self.entries.items()):
+            age=stamp-observed;missing=stamp-updated
+            if age>self.maximum_age:
+                del self.entries[identity];continue
+            value=dict(item)
+            if missing>0.:
+                value.update(position=[p+v*missing for p,v in zip(item["position"],item["velocity"])],
+                             radius=float(item["radius"])+.25*missing,
+                             height=float(item["height"])+.5*missing,
+                             observed=False,occluded_for_s=age,remembered=True)
+            result.append(value)
+        return result
+
+
 def validate_obstacle(value):
     required = ("id", "position", "velocity", "radius", "height")
     missing = [key for key in required if key not in value]
@@ -330,6 +361,29 @@ def collective_avoidance_candidates(paths, lateral=3.5, vertical=3.0):
 def validate_static_paths(scene_id, paths):
     """Validate actual vehicle xyz paths against scene geometry and limits."""
     from logistics_gazebo_sim.clearance_analyzer import analyze_path
+    if isinstance(scene_id, str) and scene_id.startswith('outdoor_'):
+        import os
+        import rospkg
+        from logistics_gazebo_sim.outdoor_world_profile import (check_cruise_route,
+                                                                 load_outdoor_profile)
+        world_dir=os.path.join(rospkg.RosPack().get_path('logistics_gazebo_sim'),
+                               'worlds')
+        profile=load_outdoor_profile(scene_id,world_dir)
+        reports=[]
+        for index,path in enumerate(paths):
+            xyz=np.asarray(path,dtype=float)[:,1:]
+            report=check_cruise_route(profile,xyz,1.2,0.6,0.6)
+            report['vehicle_id']='uav{}'.format(index)
+            report['message']=('clear' if report['feasible'] else
+                               'outdoor static route violates '+report['error_code'])
+            reports.append(report)
+        failed=next((value for value in reports if not value['feasible']),None)
+        return {'feasible':failed is None,
+                'error_code':None if failed is None else failed['error_code'],
+                'message':'all vehicle paths satisfy static constraints' if failed is None else failed['message'],
+                'vehicle_id':None if failed is None else failed['vehicle_id'],
+                'obstacle':None if failed is None else failed.get('obstacle'),
+                'reports':reports}
     reports=[]
     for index,path in enumerate(paths):
         xyz=np.asarray(path,dtype=float)[:,1:]

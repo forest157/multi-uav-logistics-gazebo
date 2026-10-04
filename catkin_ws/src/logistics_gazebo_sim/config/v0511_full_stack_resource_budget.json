@@ -1,0 +1,8 @@
+{
+  "hardware_profile": "Intel Core i9-14900HX, 32 logical CPUs, 30 GiB RAM, NVIDIA RTX 4060 Laptop 8 GiB",
+  "workload": "Three PX4 SITL UAVs, Gazebo Classic outdoor world, 720x32 5 Hz physical lidar, ROS/MAVROS mission, safety, energy and ORCA limited; headless, active cruise, 30 s sample",
+  "minimum_real_time_factor": 0.8,
+  "maximum_cpu_cores": 8.0,
+  "maximum_full_stack_pss_mib": 12288.0,
+  "notes": "Provisional predeclared acceptance on this machine. PSS includes the roslaunch tree and avoids shared-page double counting. GPU is recorded machine-wide for context, not a pass/fail metric. Passing one 30 s window does not prove long-run or GUI performance."
+}

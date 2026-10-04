@@ -6,8 +6,7 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 from logistics_gazebo_sim.energy_return_policy import EnergyReturnPolicy
 from logistics_gazebo_sim.energy_return_policy import choose_alternate_landing_site
-from logistics_gazebo_sim.clearance_analyzer import obstacle_primitives
-from logistics_gazebo_sim.scenes import SCENES
+from logistics_gazebo_sim.static_world_map import static_primitives_for_world
 
 
 def _safe_slots(values,minimum):
@@ -25,9 +24,11 @@ class EnergyReturnAdvisor:
         with open(rospy.get_param("~mission_config",default),encoding="utf-8") as stream:self.config=yaml.safe_load(stream)
         self.count=int(rospy.get_param("~vehicle_count",self.config["vehicle_count"]))
         spacing=float(rospy.get_param("~spawn_spacing_m",3.3));middle=(self.count-1)*.5
-        self.scene_id=int(rospy.get_param("~scene_id",0));self.origin=(float(rospy.get_param("~spawn_x",-40.)),float(rospy.get_param("~spawn_y",-40.)))
-        if self.scene_id not in SCENES:raise ValueError("invalid scene_id")
-        self.primitives=obstacle_primitives(SCENES[self.scene_id]);self.alternate=None
+        outdoor_world=rospy.get_param("~outdoor_world",None)
+        scene_id=rospy.get_param("~scene_id",None if outdoor_world else 0)
+        world_dir=(os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim"),"worlds") if outdoor_world else None)
+        self.primitives=static_primitives_for_world(scene_id,outdoor_world,world_dir);self.alternate=None
+        self.origin=(float(rospy.get_param("~spawn_x",-40.)),float(rospy.get_param("~spawn_y",-40.)))
         self.spawn=[((i-middle)*spacing,0.,0.) for i in range(self.count)]
         formation=self.config.get("formation",{});self.minimum_separation=float(formation.get("minimum_separation_m",3.0))+float(formation.get("tracking_reserve_m",.3))
         self.home=_safe_slots([tuple(list(value)+[0.] if len(value)==2 else value) for value in self.config["initial_formation"]],self.minimum_separation)

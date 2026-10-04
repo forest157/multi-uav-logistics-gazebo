@@ -1,0 +1,12 @@
+frame_id: map
+rate_hz: 40.0
+obstacles:
+  - id: lidar_positive_bird
+    start: [-29.0, -46.0, 1.5]
+    end: [-29.0, -34.0, 1.5]
+    speed_mps: 2.5
+    radius_m: 0.75
+    height_m: 1.5
+    phase_s: 0.0
+    bob_amplitude_m: 0.0
+    colour: "0.14 0.18 0.22 1"

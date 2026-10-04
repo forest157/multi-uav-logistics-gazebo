@@ -1,0 +1,353 @@
+{
+  "extent_m": [
+    240,
+    220
+  ],
+  "road_width_m": 10,
+  "blocks": [
+    [
+      -78,
+      -65,
+      30,
+      28,
+      14
+    ],
+    [
+      -78,
+      0,
+      30,
+      28,
+      22
+    ],
+    [
+      -78,
+      65,
+      30,
+      28,
+      30
+    ],
+    [
+      -26,
+      -65,
+      30,
+      28,
+      22
+    ],
+    [
+      -26,
+      0,
+      30,
+      28,
+      30
+    ],
+    [
+      -26,
+      65,
+      30,
+      28,
+      14
+    ],
+    [
+      26,
+      -65,
+      30,
+      28,
+      30
+    ],
+    [
+      26,
+      0,
+      30,
+      28,
+      14
+    ],
+    [
+      26,
+      65,
+      30,
+      28,
+      22
+    ],
+    [
+      78,
+      -65,
+      30,
+      28,
+      14
+    ],
+    [
+      78,
+      0,
+      30,
+      28,
+      22
+    ],
+    [
+      78,
+      65,
+      30,
+      28,
+      30
+    ]
+  ],
+  "roads": [
+    [
+      0,
+      -32.5,
+      230,
+      10
+    ],
+    [
+      0,
+      32.5,
+      230,
+      10
+    ],
+    [
+      -52,
+      0,
+      10,
+      210
+    ],
+    [
+      0,
+      0,
+      10,
+      210
+    ],
+    [
+      52,
+      0,
+      10,
+      210
+    ]
+  ],
+  "pads": [
+    [
+      -90,
+      -95
+    ],
+    [
+      -75,
+      -95
+    ],
+    [
+      -60,
+      -95
+    ]
+  ],
+  "goal": [
+    90,
+    95
+  ],
+  "description": "Dense urban blocks with varied building heights",
+  "world": "outdoor_urban.world",
+  "coordinate_system": "ENU",
+  "unit": "metre",
+  "spawn_center_m": [
+    -75.0,
+    -95.0
+  ],
+  "spawn_spacing_m": 15,
+  "spawn_positions_m": [
+    [
+      -90,
+      -95
+    ],
+    [
+      -75,
+      -95
+    ],
+    [
+      -60,
+      -95
+    ]
+  ],
+  "goal_center_m": [
+    90,
+    95
+  ],
+  "arrival_positions_m": [
+    [
+      75,
+      95
+    ],
+    [
+      90,
+      95
+    ],
+    [
+      105,
+      95
+    ]
+  ],
+  "layout_extent_m": [
+    240,
+    220
+  ],
+  "clearance_m": 3.5,
+  "status": "ground_layout_passed",
+  "limitation": "No route, flight-controller or in-flight clearance approval",
+  "schema_version": 1,
+  "world_sha256": "9ef3a007eba7955226c132c16e2498185eec523dda796f7b736c302a6c65186f",
+  "world_bytes": 8467,
+  "sdf_model_count": 21,
+  "external_include_uris": [
+    "model://sun",
+    "model://ground_plane"
+  ],
+  "world_collision_count": 12,
+  "asset_origin": "project_generated",
+  "recommended_cruise_altitude_m": 33.0,
+  "maximum_building_height_m": 30,
+  "maximum_supported_uavs": 3,
+  "no_fly_volumes": [
+    {
+      "center_xy_m": [
+        -78,
+        -65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 14
+    },
+    {
+      "center_xy_m": [
+        -78,
+        0
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 22
+    },
+    {
+      "center_xy_m": [
+        -78,
+        65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 30
+    },
+    {
+      "center_xy_m": [
+        -26,
+        -65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 22
+    },
+    {
+      "center_xy_m": [
+        -26,
+        0
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 30
+    },
+    {
+      "center_xy_m": [
+        -26,
+        65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 14
+    },
+    {
+      "center_xy_m": [
+        26,
+        -65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 30
+    },
+    {
+      "center_xy_m": [
+        26,
+        0
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 14
+    },
+    {
+      "center_xy_m": [
+        26,
+        65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 22
+    },
+    {
+      "center_xy_m": [
+        78,
+        -65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 14
+    },
+    {
+      "center_xy_m": [
+        78,
+        0
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 22
+    },
+    {
+      "center_xy_m": [
+        78,
+        65
+      ],
+      "size_xy_m": [
+        30,
+        28
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 30
+    }
+  ],
+  "dynamic_obstacle_routes": [],
+  "dynamic_obstacles_enabled": false,
+  "mission_integration": "pending_planner_and_flight_validation"
+}

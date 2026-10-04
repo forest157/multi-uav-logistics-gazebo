@@ -1,0 +1,227 @@
+{
+  "extent_m": [
+    180,
+    160
+  ],
+  "road_width_m": 10,
+  "blocks": [
+    [
+      -55,
+      -38,
+      24,
+      22,
+      10
+    ],
+    [
+      -55,
+      38,
+      24,
+      22,
+      10
+    ],
+    [
+      0,
+      -38,
+      24,
+      22,
+      16
+    ],
+    [
+      0,
+      38,
+      24,
+      22,
+      16
+    ],
+    [
+      55,
+      -38,
+      24,
+      22,
+      12
+    ],
+    [
+      55,
+      38,
+      24,
+      22,
+      12
+    ]
+  ],
+  "roads": [
+    [
+      0,
+      0,
+      170,
+      10
+    ],
+    [
+      -28,
+      0,
+      10,
+      150
+    ],
+    [
+      28,
+      0,
+      10,
+      150
+    ]
+  ],
+  "pads": [
+    [
+      -60,
+      -65
+    ],
+    [
+      -45,
+      -65
+    ],
+    [
+      -30,
+      -65
+    ]
+  ],
+  "goal": [
+    60,
+    65
+  ],
+  "description": "Open campus with separated teaching and office buildings",
+  "world": "outdoor_campus.world",
+  "coordinate_system": "ENU",
+  "unit": "metre",
+  "spawn_center_m": [
+    -45.0,
+    -65.0
+  ],
+  "spawn_spacing_m": 15,
+  "spawn_positions_m": [
+    [
+      -60,
+      -65
+    ],
+    [
+      -45,
+      -65
+    ],
+    [
+      -30,
+      -65
+    ]
+  ],
+  "goal_center_m": [
+    60,
+    65
+  ],
+  "arrival_positions_m": [
+    [
+      45,
+      65
+    ],
+    [
+      60,
+      65
+    ],
+    [
+      75,
+      65
+    ]
+  ],
+  "layout_extent_m": [
+    180,
+    160
+  ],
+  "clearance_m": 3.5,
+  "status": "ground_layout_passed",
+  "limitation": "No route, flight-controller or in-flight clearance approval",
+  "schema_version": 1,
+  "world_sha256": "f2b0b7511dae197a5c784af2032d7ff05d09194610ae7606df07eaab29f8aa05",
+  "world_bytes": 5464,
+  "sdf_model_count": 13,
+  "external_include_uris": [
+    "model://sun",
+    "model://ground_plane"
+  ],
+  "world_collision_count": 6,
+  "asset_origin": "project_generated",
+  "recommended_cruise_altitude_m": 19.0,
+  "maximum_building_height_m": 16,
+  "maximum_supported_uavs": 3,
+  "no_fly_volumes": [
+    {
+      "center_xy_m": [
+        -55,
+        -38
+      ],
+      "size_xy_m": [
+        24,
+        22
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 10
+    },
+    {
+      "center_xy_m": [
+        -55,
+        38
+      ],
+      "size_xy_m": [
+        24,
+        22
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 10
+    },
+    {
+      "center_xy_m": [
+        0,
+        -38
+      ],
+      "size_xy_m": [
+        24,
+        22
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 16
+    },
+    {
+      "center_xy_m": [
+        0,
+        38
+      ],
+      "size_xy_m": [
+        24,
+        22
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 16
+    },
+    {
+      "center_xy_m": [
+        55,
+        -38
+      ],
+      "size_xy_m": [
+        24,
+        22
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 12
+    },
+    {
+      "center_xy_m": [
+        55,
+        38
+      ],
+      "size_xy_m": [
+        24,
+        22
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 12
+    }
+  ],
+  "dynamic_obstacle_routes": [],
+  "dynamic_obstacles_enabled": false,
+  "mission_integration": "pending_planner_and_flight_validation"
+}

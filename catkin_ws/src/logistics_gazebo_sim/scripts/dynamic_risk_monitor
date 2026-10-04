@@ -8,13 +8,17 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header, String
 
-from logistics_gazebo_sim.dynamic_obstacles import RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, obstacle_feed_state, prediction_path
+from logistics_gazebo_sim.dynamic_obstacles import ObstacleMemory, RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, obstacle_feed_state, prediction_path
 
 
 class DynamicRiskMonitor:
     def __init__(self):
         self.count = int(rospy.get_param("~vehicle_count", 3))
-        self.scene_id = int(rospy.get_param("~scene_id", 0))
+        outdoor_world=rospy.get_param("~outdoor_world",None)
+        if outdoor_world and rospy.has_param("~scene_id"):
+            raise ValueError("select either outdoor_world or scene_id")
+        self.scene_id=(str(outdoor_world) if outdoor_world else
+                       int(rospy.get_param("~scene_id",0)))
         self.horizon = float(rospy.get_param("~horizon_s", 8.0))
         self.speed = float(rospy.get_param("~assumed_speed_mps", 2.0))
         self.warning = float(rospy.get_param("~warning_clearance_m", 2.0))
@@ -26,6 +30,8 @@ class DynamicRiskMonitor:
         self.level_hysteresis=RiskLevelHysteresis(float(rospy.get_param("~risk_release_delay_s",0.8)))
         self.minimum_separation = float(rospy.get_param("~minimum_separation_m", 3.0))
         self.orca_required_clearance = float(rospy.get_param("~orca_required_clearance_m", 0.5))
+        if self.orca_required_clearance<0.0:
+            raise ValueError("ORCA required clearance must be non-negative")
         self.local_avoidance_algorithm = str(rospy.get_param(
             "~local_avoidance_algorithm", "collective_offset"))
         sx = float(rospy.get_param("~spawn_x", -40.0))
@@ -36,8 +42,12 @@ class DynamicRiskMonitor:
                         for index in range(self.count)]
         self.poses = [None] * self.count
         self.velocities = [None] * self.count
+        self.pose_stamps=[None]*self.count;self.velocity_stamps=[None]*self.count
+        self.obstacle_source_stamp=None
         self.targets = [None] * self.count
         self.obstacles = []
+        self.obstacle_memory=ObstacleMemory();self.orca_recovery_active=False
+        rospy.Subscriber("/fleet/mission_state",String,self.mission_cb,queue_size=1)
         self.last_obstacle_stamp = None
         self.predicted_paths = None
         self.last_prediction_stamp = None
@@ -68,12 +78,14 @@ class DynamicRiskMonitor:
 
     def pose_cb(self, message, index):
         self.poses[index] = message.pose.position
+        self.pose_stamps[index]=message.header.stamp.to_sec()
 
     def target_cb(self, message, index):
         self.targets[index] = message.pose.position
 
     def velocity_cb(self,message,index):
         value=message.twist.linear;self.velocities[index]=(value.x,value.y,value.z)
+        self.velocity_stamps[index]=message.header.stamp.to_sec()
 
     def critical_ttc_threshold(self):
         from logistics_gazebo_sim.dynamic_obstacles import braking_ttc_threshold
@@ -82,10 +94,15 @@ class DynamicRiskMonitor:
         return braking_ttc_threshold(speed,self.max_deceleration,self.control_delay,
             self.braking_margin,self.critical_ttc_min,self.critical_ttc_max)
 
+    def mission_cb(self,message):
+        try:self.orca_recovery_active=bool(json.loads(message.data).get("avoidance_recovering",False))
+        except (TypeError,ValueError):pass
+
     def obstacles_cb(self, message):
         try:
             payload = json.loads(message.data)
-            self.obstacles = payload.get("obstacles", [])
+            self.obstacle_source_stamp=float(payload.get("stamp",rospy.get_time()))
+            self.obstacles=self.obstacle_memory.update(payload.get("obstacles",[]),self.obstacle_source_stamp)
             self.last_obstacle_stamp = rospy.Time.now()
         except (TypeError, ValueError) as error:
             rospy.logerr_throttle(2.0, "invalid dynamic obstacle state: %s", error)
@@ -158,7 +175,8 @@ class DynamicRiskMonitor:
                      "obstacles":self.obstacles,
                      "options":{"algorithm":self.local_avoidance_algorithm,
                          "horizon":self.horizon,"scene_id":self.scene_id,
-                         "minimum_separation":self.minimum_separation}}
+                         "minimum_separation":self.minimum_separation,
+                         "required_clearance":self.orca_required_clearance}}
             self.request_pub.publish(json.dumps(request,separators=(",",":")))
             self.last_request_stamp=now
         return self.cached_avoidance or {
@@ -167,12 +185,31 @@ class DynamicRiskMonitor:
             "minimum_clearance_m":None,
             "rejection_summary":{"PLANNER_PENDING":1}}
 
+    def execution_context(self):
+        now=rospy.get_time()
+        stamps=self.pose_stamps+self.velocity_stamps+[self.obstacle_source_stamp]
+        if any(s is None or not math.isfinite(s) or not 0.0<=now-s<=0.5 for s in stamps):return None
+        positions=[]
+        for i,p in enumerate(self.poses):
+            if p is None or self.velocities[i] is None:return None
+            age=now-self.pose_stamps[i];ox,oy=self.origins[i]
+            positions.append([p.x+ox+age*self.velocities[i][0],p.y+oy+age*self.velocities[i][1],p.z+age*self.velocities[i][2]])
+        age=now-self.obstacle_source_stamp
+        obstacles=[dict(o,position=[p+age*v for p,v in zip(o["position"],o["velocity"])]) for o in self.obstacles]
+        return dict(stamp=now,positions=positions,velocities=self.velocities,obstacles=obstacles,
+                    nominal_errors=[math.dist(positions[i],[p.x+self.origins[i][0],p.y+self.origins[i][1],p.z]) for i,p in enumerate(self.targets)],
+                    nominal_vertical_errors=[positions[i][2]-p.z for i,p in enumerate(self.targets)],
+                    horizon=self.horizon,control_delay=self.control_delay,
+                    minimum_separation=self.minimum_separation,
+                    required_clearance=self.orca_required_clearance,
+                    scene_id=self.scene_id)
+
     def report(self):
         now=rospy.Time.now();last=None if self.last_obstacle_stamp is None else self.last_obstacle_stamp.to_sec()
         if obstacle_feed_state(last,now.to_sec(),1.0)=="STALE":
             self.obstacles=[]
             return {"level":"STALE","message":"等待动态障碍数据","vehicle_reports":[],"obstacle_count":0}
-        if not self.obstacles:
+        if not self.obstacles and not self.orca_recovery_active:
             return {"level":"SAFE","message":"未检测到动态障碍","vehicle_reports":[],"obstacle_count":0,"minimum_clearance_m":None,"time_to_conflict_s":None,"local_avoidance_algorithm":self.local_avoidance_algorithm,"avoidance":{"viable":False,"selected_offset":None,"reason":"avoidance not required","candidates":[],"minimum_clearance_m":None}}
         if any(value is None for value in self.poses+self.targets):
             return {"level": "STALE", "message": "等待无人机位姿与目标",
@@ -194,7 +231,7 @@ class DynamicRiskMonitor:
             paths,horizon=self.horizon,minimum_separation=self.minimum_separation)
         if not separation["safe"]:level="CRITICAL"
         level=self.level_hysteresis.update(level,rospy.get_time())
-        if level in ("WARNING","CRITICAL"):
+        if level in ("WARNING","CRITICAL") or self.orca_recovery_active:
             avoidance=self.request_plan(paths)
         else:
             self.cached_avoidance=None;self.pending_request=None
@@ -210,6 +247,7 @@ class DynamicRiskMonitor:
                 "minimum_clearance_m": nearest["minimum_clearance_m"],
                 "time_to_conflict_s": nearest["time_to_conflict_s"],
                 "critical_ttc_s":critical_ttc,
+                "execution_context":self.execution_context(),
                 "fleet_separation":separation,
                 "local_avoidance_algorithm":self.local_avoidance_algorithm,
                 "avoidance":avoidance}

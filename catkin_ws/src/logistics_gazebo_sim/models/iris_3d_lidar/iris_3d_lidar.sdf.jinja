@@ -59,11 +59,11 @@
       <sensor name='lidar_3d' type='ray'>
         <pose>0 0 0.18 0 0 0</pose>
         <ray><scan>
-          <horizontal><samples>180</samples><resolution>1</resolution><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal>
-          <vertical><samples>16</samples><resolution>1</resolution><min_angle>-0.261799</min_angle><max_angle>0.261799</max_angle></vertical>
+          <horizontal><samples>720</samples><resolution>1</resolution><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal>
+          <vertical><samples>32</samples><resolution>1</resolution><min_angle>-0.261799</min_angle><max_angle>0.261799</max_angle></vertical>
         </scan><range><min>0.4</min><max>35.0</max><resolution>0.03</resolution></range>
         <noise><type>gaussian</type><mean>0.0</mean><stddev>0.02</stddev></noise></ray>
-        <plugin name='gazebo_ros_3d_lidar' filename='libgazebo_ros_block_laser.so'>
+        <plugin name='gazebo_ros_3d_lidar' filename='liblogistics_lidar_plugin.so'>
           <robotNamespace>uav{{ mavlink_id | int - 1 }}</robotNamespace><topicName>lidar/points</topicName>
           <frameName>uav{{ mavlink_id | int - 1 }}/lidar</frameName>
           <gaussianNoise>0.0</gaussianNoise><updateRate>5.0</updateRate><alwaysOn>true</alwaysOn>

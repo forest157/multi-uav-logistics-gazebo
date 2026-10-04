@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+import argparse,json,os
+import rospkg
+from logistics_gazebo_sim.world_audit import audit_world_directory
+
+try:default_worlds=os.path.join(rospkg.RosPack().get_path("logistics_gazebo_sim"),"worlds")
+except rospkg.ResourceNotFound:default_worlds=os.path.abspath(os.path.join(os.path.dirname(__file__),"..","worlds"))
+parser=argparse.ArgumentParser();parser.add_argument("--world-dir",default=default_worlds);parser.add_argument("--output")
+args=parser.parse_args();report=audit_world_directory(args.world_dir);rendered=json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
+if args.output:
+    with open(args.output,"w",encoding="utf-8") as stream:stream.write(rendered+"\n")
+print(rendered)
+raise SystemExit(0 if report["pass"] else 1)

@@ -1,5 +1,7 @@
 <launch>
   <arg name="scene_id" default="0"/>
+  <arg name="outdoor_world" default=""/>
+  <arg name="world_name" default="$(find logistics_gazebo_sim)/worlds/scene_$(arg scene_id).world"/>
   <arg name="gui" default="true"/>
   <arg name="gazebo_master_uri" default="http://127.0.0.1:11450"/>
   <arg name="mission_config" default="$(find logistics_gazebo_sim)/config/mission_scene0.yaml"/>
@@ -24,6 +26,7 @@
   <arg name="lidar_cloud_aggregation" default="true"/>
   <include file="$(find logistics_gazebo_sim)/launch/three_uav_sitl.launch">
     <arg name="scene_id" value="$(arg scene_id)"/>
+    <arg name="world_name" value="$(arg world_name)"/>
     <arg name="gui" value="$(arg gui)"/>
     <arg name="target_z" value="$(arg target_z)"/>
     <arg name="gazebo_master_uri" value="$(arg gazebo_master_uri)"/>
@@ -34,7 +37,10 @@
         name="dynamic_risk_monitor" output="screen">
     <env name="OPENBLAS_NUM_THREADS" value="1"/>
     <env name="OMP_NUM_THREADS" value="1"/>
-    <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
+    <param name="vehicle_count" value="$(arg vehicle_count)"/>
+    <param unless="$(eval arg('outdoor_world') != '')" name="scene_id" value="$(arg scene_id)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="outdoor_world" value="$(arg outdoor_world)"/>
+    <param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
     <param name="horizon_s" value="8.0"/><param name="minimum_separation_m" value="3.0"/>
     <param name="warning_clearance_m" value="8.0"/>
     <param name="max_deceleration_mps2" value="1.0"/><param name="control_delay_s" value="0.6"/>
@@ -58,8 +64,12 @@
   </group>
   <group if="$(eval arg('dynamic_obstacles') and arg('dynamic_state_source') == 'lidar')">
     <node pkg="logistics_gazebo_sim" type="lidar_dynamic_detector" name="lidar_dynamic_detector" output="screen">
+      <param unless="$(eval arg('outdoor_world') != '')" name="scene_id" value="$(arg scene_id)"/>
+      <param if="$(eval arg('outdoor_world') != '')" name="outdoor_world" value="$(arg outdoor_world)"/>
       <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
       <param name="ground_filter_z" value="0.7"/><param name="warmup_frames" value="8"/><param name="voxel_size_m" value="0.45"/><param name="background_hits" value="4"/>
+      <param name="static_map_margin_m" value="1.5"/>
+      <param name="vehicle_exclusion_radius_m" value="1.8"/>
       <param name="cluster_tolerance_m" value="0.9"/><param name="association_distance_m" value="1.8"/><param name="confirmation_hits" value="4"/><param name="maximum_misses" value="3"/><param name="maximum_association_age_s" value="1.5"/><param name="minimum_motion_speed_mps" value="1.5"/><param name="maximum_motion_speed_mps" value="12.0"/><param name="minimum_motion_direction_cosine" value="0.7"/><param name="maximum_motion_acceleration_mps2" value="5.0"/><param name="minimum_cluster_points" value="8"/><param name="maximum_target_radius_m" value="1.4"/><param name="maximum_target_height_m" value="2.0"/>
     </node>
     <node pkg="logistics_gazebo_sim" type="dynamic_target_tracker" name="dynamic_target_tracker" output="screen">
@@ -69,6 +79,7 @@
   </group>
   <node if="$(arg lidar_cloud_aggregation)" pkg="logistics_gazebo_sim" type="lidar_cloud_aggregator" name="lidar_cloud_aggregator" output="screen">
     <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
+    <param name="vehicle_exclusion_radius_m" value="1.8"/>
   </node>
   <node if="$(arg dynamic_obstacles)" pkg="logistics_gazebo_sim"
         type="dynamic_avoidance_planner" name="dynamic_avoidance_planner" output="screen" respawn="true">
@@ -81,6 +92,13 @@
     <arg name="expected_vehicle_count" value="$(arg vehicle_count)"/>
   </include>
   <node pkg="logistics_gazebo_sim" type="fleet_mission_player" name="fleet_mission_player" output="screen">
+    <param if="$(eval arg('outdoor_world') != '')" name="outdoor_world" value="$(arg outdoor_world)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="world_file" value="$(arg world_name)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="spawn_x" value="$(arg spawn_x)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="spawn_y" value="$(arg spawn_y)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="goal_x" value="$(arg goal_x)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="goal_y" value="$(arg goal_y)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="target_z" value="$(arg target_z)"/>
     <param name="energy_return_control_mode" value="limited"/><param name="energy_landing_stagger_s" value="2.0"/>
     <param name="config" value="$(arg mission_config)"/>
     <param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
@@ -103,12 +121,14 @@
     <param name="safety_release_delay_s" value="1.0"/>
   </node>
   <node pkg="logistics_gazebo_sim" type="fleet_safety_monitor" name="fleet_safety_monitor" output="screen">
-    <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="scene_id" value="$(arg scene_id)"/>
+    <param name="vehicle_count" value="$(arg vehicle_count)"/>
+    <param unless="$(eval arg('outdoor_world') != '')" name="scene_id" value="$(arg scene_id)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="outdoor_world" value="$(arg outdoor_world)"/>
     <param name="min_separation" value="2.2"/><param name="min_obstacle_clearance" value="1.0"/>
     <param name="max_tracking_error" value="2.0"/>
     <param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/>
   </node>
-  <node pkg="logistics_gazebo_sim" type="fleet_visualizer" name="fleet_visualizer" output="screen"><param name="vehicle_count" value="$(arg vehicle_count)"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/></node>
+  <node unless="$(eval arg('outdoor_world') != '')" pkg="logistics_gazebo_sim" type="fleet_visualizer" name="fleet_visualizer" output="screen"><param name="vehicle_count" value="$(arg vehicle_count)"/><param name="scene_id" value="$(arg scene_id)"/><param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/><param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/></node>
   <node pkg="logistics_gazebo_sim" type="mission_recorder" name="mission_recorder" output="screen"><param name="vehicle_count" value="$(arg vehicle_count)"/></node>
   <node pkg="logistics_gazebo_sim" type="fleet_energy_monitor" name="fleet_energy_monitor" output="screen">
     <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="mission_config" value="$(arg mission_config)"/>
@@ -116,7 +136,9 @@
     <param name="reserve_fraction" value="0.20"/><param name="payload_mass_kg" value="0.50"/><param name="reserve_wait_s" value="60.0"/>
   </node>
   <node pkg="logistics_gazebo_sim" type="energy_return_advisor" name="energy_return_advisor" output="screen">
-    <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="mission_config" value="$(arg mission_config)"/><param name="scene_id" value="$(arg scene_id)"/>
+    <param name="vehicle_count" value="$(arg vehicle_count)"/><param name="mission_config" value="$(arg mission_config)"/>
+    <param unless="$(eval arg('outdoor_world') != '')" name="scene_id" value="$(arg scene_id)"/>
+    <param if="$(eval arg('outdoor_world') != '')" name="outdoor_world" value="$(arg outdoor_world)"/>
     <param name="spawn_x" value="$(arg spawn_x)"/><param name="spawn_y" value="$(arg spawn_y)"/>
     <param name="spawn_spacing_m" value="$(arg spawn_spacing_m)"/><param name="low_margin_wh" value="12.0"/>
     <param name="critical_margin_wh" value="0.0"/><param name="release_hysteresis_wh" value="3.0"/><param name="energy_stale_after_s" value="1.5"/>

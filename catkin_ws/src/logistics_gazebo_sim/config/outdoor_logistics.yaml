@@ -1,0 +1,15 @@
+world: outdoor_logistics.world
+coordinate_system: ENU
+start:
+  x_m: -18.0
+  y_m: -4.0
+  z_m: 2.5
+  zone: three_uav_pad_row
+goal:
+  x_m: 0.0
+  y_m: 42.0
+  z_m: 2.5
+  zone: north_delivery_zone
+recommended_cruise_height_m: 12.0
+clearance_margin_m: 2.0
+status: candidate_layout_pending_flight_regression

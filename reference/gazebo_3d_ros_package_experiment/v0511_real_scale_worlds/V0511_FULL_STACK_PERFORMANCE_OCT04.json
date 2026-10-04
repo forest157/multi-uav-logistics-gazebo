@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-04",
+  "world": "outdoor_campus",
+  "workload": "three PX4 SITL UAVs, physical 720x32 5 Hz lidar, MAVROS, mission, safety, energy and ORCA limited; headless active cruise",
+  "budget_declared_before_run": "catkin_ws/src/logistics_gazebo_sim/config/v0511_full_stack_resource_budget.json",
+  "sample_wall_s": 30.031,
+  "sample_sim_s": 26.236,
+  "real_time_factor": 0.874,
+  "gzserver_cpu_cores": 0.524,
+  "gzserver_rss_end_mib": 6534.1,
+  "full_stack_cpu_cores": 1.498,
+  "full_stack_pss_peak_sampled_mib": 7239.5,
+  "full_stack_process_count_peak": 27,
+  "host_gpu_start": {"used_mib": 264, "utilization_percent": 55},
+  "host_gpu_end": {"used_mib": 264, "utilization_percent": 11},
+  "gpu_scope": "machine-wide and not attributable to the simulator",
+  "acceptance": {
+    "minimum_real_time_factor": 0.8,
+    "maximum_cpu_cores": 8.0,
+    "maximum_full_stack_pss_mib": 12288.0,
+    "passed": true
+  },
+  "scope": "One 30-second 1 Hz sampled PSS window on Intel i9-14900HX, 30 GiB RAM, RTX 4060 Laptop 8 GiB. Does not establish GUI or long-duration performance.",
+  "runtime_note": "The active mission in this resource rerun was interrupted by a subsequent host/container restart, so it is not counted as another complete flight. Earlier three-world complete-flight audits are separate."
+}

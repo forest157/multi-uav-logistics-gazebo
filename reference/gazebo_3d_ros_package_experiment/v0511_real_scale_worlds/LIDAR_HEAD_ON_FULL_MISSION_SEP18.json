@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-18",
+  "branch": "feature/v0511-real-scale-worlds",
+  "scenario": "scene_0, three UAVs, physical lidar, one head-on reciprocating bird, ORCA limited execution",
+  "dynamic_obstacle_config": "config/dynamic_obstacles_head_on.yaml",
+  "source_capture": "/tmp/lidar_head_on_sep18_r3.jsonl",
+  "source_capture_committed": false,
+  "samples": 4413,
+  "valid_truth_samples": 4413,
+  "mission_elapsed_s": 293.81,
+  "bird_truth_samples": 13230,
+  "frames_with_perception_tracks": 967,
+  "maximum_perception_track_count": 1,
+  "minimum_bird_envelope_clearance_m": 1.2940416790462512,
+  "minimum_fleet_separation_m": 3.1886982254987934,
+  "maximum_estimate_error_m": 0.5120988143166755,
+  "maximum_settled_vertical_tracking_error_m": 0.4973713973397782,
+  "settled_vertical_tracking_samples": 12183,
+  "complete": true,
+  "disarmed": true,
+  "passed": true,
+  "criteria": {
+    "minimum_fleet_separation_m": 3.0,
+    "minimum_bird_envelope_clearance_m": 0.0,
+    "maximum_estimate_error_m": 1.0,
+    "maximum_settled_vertical_tracking_error_m": 1.0,
+    "truth_max_receipt_age_s": 0.2
+  },
+  "scope": "Conservative sampled truth sphere envelopes over repeated head-on crossings; not a continuous contact-sensor proof or a substitute for the remaining multi-bird and outdoor-world matrix."
+}
