@@ -1,0 +1,123 @@
+{
+  "checks": [
+    {
+      "errors": [],
+      "id": "outdoor_campus:world",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_campus:no_bird:1",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_campus:no_bird:2",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_campus:repeat",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_residential:world",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_residential:no_bird:1",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_residential:no_bird:2",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_residential:repeat",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_urban:world",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_urban:no_bird:1",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_urban:no_bird:2",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "outdoor_urban:repeat",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "single_bird",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "perception:matrix",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "perception:dropout",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "energy_safety:interlock",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "energy_safety:landing",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "energy_safety:model",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "energy_safety:return",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "resource_budget",
+      "passed": true
+    },
+    {
+      "errors": [],
+      "id": "version_metadata",
+      "passed": true
+    },
+    {
+      "errors": [
+        "required evidence not yet integrated"
+      ],
+      "id": "pending:final_release_documents_and_review",
+      "passed": false
+    }
+  ],
+  "exclusions": [
+    "User-deferred two-bird closed-loop flight is not part of this release gate.",
+    "Imported Baylands world is asset-only; no automatic three-UAV flight claim.",
+    "Sampled sphere envelopes are not continuous contact-sensor proof."
+  ],
+  "passed": false,
+  "release": "v0.5.12"
+}

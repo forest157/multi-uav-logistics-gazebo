@@ -1,0 +1,43 @@
+{
+  "case_count": 6,
+  "cases": {
+    "empty_air": {
+      "pass": true,
+      "track_samples": 0
+    },
+    "long_occlusion": {
+      "after_id": "lidar_target_1",
+      "before_id": "lidar_target_0",
+      "pass": true
+    },
+    "perception_stale": {
+      "actions": [
+        "SLOW",
+        "HOLD",
+        "HOLD",
+        "NORMAL"
+      ],
+      "pass": true
+    },
+    "short_occlusion": {
+      "after_id": "lidar_target_0",
+      "before_id": "lidar_target_0",
+      "occluded_samples": 3,
+      "pass": true
+    },
+    "single_target_noise": {
+      "pass": true,
+      "unique_ids": [
+        "lidar_target_0"
+      ]
+    },
+    "two_target_crossing": {
+      "pass": true,
+      "track_ids": [
+        "lidar_target_0",
+        "lidar_target_1"
+      ]
+    }
+  },
+  "pass": true
+}

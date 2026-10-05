@@ -1,0 +1,11 @@
+{
+  "alternate_site_present": true,
+  "critical_alternate": true,
+  "low_return": true,
+  "multiple_critical_holds": true,
+  "pass": true,
+  "safety_precedence": true,
+  "shadow_only": true,
+  "slots_present": true,
+  "stale_fails_safe": true
+}

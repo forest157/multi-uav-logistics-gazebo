@@ -1,0 +1,14 @@
+{
+  "capacities_wh": [
+    220.0,
+    210.0,
+    200.0
+  ],
+  "complete_requirement_zero": true,
+  "forecasts_present": true,
+  "mavros_battery_present": true,
+  "pass": true,
+  "payload_released": true,
+  "used_energy_recorded": true,
+  "vehicle_count": 3
+}

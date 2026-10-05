@@ -1,0 +1,12 @@
+{
+  "control_applied": true,
+  "critical_diversion_observed": true,
+  "home_descent_reached": true,
+  "pass": true,
+  "priority_order_observed": true,
+  "target_altitudes": [
+    7.999451604039395,
+    7.948811559615942,
+    0.18
+  ]
+}

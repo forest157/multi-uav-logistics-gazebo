@@ -1,0 +1,8 @@
+{
+  "close_minimum_separation_m": 2.5,
+  "hold_triggered": true,
+  "pass": true,
+  "released": true,
+  "stale_triggered": false,
+  "targets_locked": true
+}

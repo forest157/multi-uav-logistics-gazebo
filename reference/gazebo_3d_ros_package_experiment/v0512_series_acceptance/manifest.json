@@ -1,0 +1,57 @@
+{
+  "release": "v0.5.12",
+  "baseline_tag": "v0.5.11",
+  "minimum_runs_per_world": 2,
+  "worlds": {
+    "outdoor_campus": {
+      "world_sha256": "f2b0b7511dae197a5c784af2032d7ff05d09194610ae7606df07eaab29f8aa05",
+      "no_bird_reports": [
+        "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/campus_no_bird_run1.json",
+        "reference/gazebo_3d_ros_package_experiment/v0511_real_scale_worlds/V0511_GUI_RERUN_OCT04.json"
+      ]
+    },
+    "outdoor_residential": {
+      "world_sha256": "1fc82e2f290cd57f571ec6717ce59f9df37135cec1da322ad19732c804361f17",
+      "no_bird_reports": [
+        "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/residential_no_bird_run1.json",
+        "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/residential_no_bird_run2.json"
+      ]
+    },
+    "outdoor_urban": {
+      "world_sha256": "9ef3a007eba7955226c132c16e2498185eec523dda796f7b736c302a6c65186f",
+      "no_bird_reports": [
+        "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/urban_no_bird_run1.json",
+        "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/urban_no_bird_run2.json"
+      ]
+    }
+  },
+  "single_bird": {
+    "world": "outdoor_campus",
+    "report": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/campus_single_bird_run1.json"
+  },
+  "resource_budget": {
+    "limits": "catkin_ws/src/logistics_gazebo_sim/config/v0511_full_stack_resource_budget.json",
+    "report": "reference/gazebo_3d_ros_package_experiment/v0511_real_scale_worlds/V0511_FULL_STACK_PERFORMANCE_OCT04.json"
+  },
+  "perception": {
+    "matrix": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/perception_matrix_oct04.json",
+    "dropout": "reference/gazebo_3d_ros_package_experiment/v0511_real_scale_worlds/LIDAR_DROPOUT_RECOVERY_FULL_MISSION_SEP18.json"
+  },
+  "energy_and_safety": {
+    "model": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/energy_model_oct05.json",
+    "return": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/energy_return_oct05.json",
+    "landing": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/energy_landing_oct05.json",
+    "interlock": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/safety_interlock_oct05.json"
+  },
+  "version_metadata": {
+    "package_xml": "catkin_ws/src/logistics_gazebo_sim/package.xml",
+    "setup_py": "catkin_ws/src/logistics_gazebo_sim/setup.py"
+  },
+  "release_document": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE_DRAFT.md",
+  "pending_checks": [],
+  "exclusions": [
+    "User-deferred two-bird closed-loop flight is not part of this release gate.",
+    "Imported Baylands world is asset-only; no automatic three-UAV flight claim.",
+    "Sampled sphere envelopes are not continuous contact-sensor proof."
+  ]
+}
