@@ -1,0 +1,27 @@
+<launch>
+  <arg name="instance_id"/>
+  <arg name="x"/>
+  <arg name="y"/>
+  <arg name="target_z"/>
+  <arg name="instance_id_guard" value="$(eval 'ok' if 0 &lt;= int(arg('instance_id')) &lt;= 7 else int('SITL instance ID must be 0..7'))"/>
+
+  <group ns="$(eval 'uav' + str(int(arg('instance_id'))))">
+    <include file="$(find logistics_gazebo_sim)/launch/single_vehicle_lidar_spawn.launch">
+      <arg name="x" value="$(arg x)"/><arg name="y" value="$(arg y)"/><arg name="z" value="0"/>
+      <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
+      <arg name="vehicle" value="iris"/>
+      <arg name="mavlink_udp_port" value="$(eval 14560 + int(arg('instance_id')))"/>
+      <arg name="mavlink_tcp_port" value="$(eval 4560 + int(arg('instance_id')))"/>
+      <arg name="ID" value="$(arg instance_id)"/>
+    </include>
+    <include file="$(find mavros)/launch/px4.launch">
+      <arg name="fcu_url" value="$(eval 'udp://:' + str(14540 + int(arg('instance_id'))) + '@localhost:' + str(14580 + int(arg('instance_id'))))"/>
+      <arg name="gcs_url" value=""/>
+      <arg name="tgt_system" value="$(eval 1 + int(arg('instance_id')))"/>
+      <arg name="tgt_component" value="1"/>
+    </include>
+    <node pkg="logistics_gazebo_sim" type="offboard_controller" name="offboard_controller" output="screen">
+      <param name="x" value="0"/><param name="y" value="0"/><param name="z" value="$(arg target_z)"/>
+    </node>
+  </group>
+</launch>

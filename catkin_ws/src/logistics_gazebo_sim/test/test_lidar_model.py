@@ -28,7 +28,9 @@ class LidarModelTest(unittest.TestCase):
 
     def test_three_vehicle_launch_uses_lidar_model(self):
         launch=(ROOT/"launch"/"three_uav_sitl.launch").read_text(encoding="utf-8")
-        self.assertEqual(launch.count("single_vehicle_lidar_spawn.launch"),3)
+        instance=(ROOT/"launch"/"sitl_instance.launch").read_text(encoding="utf-8")
+        self.assertEqual(launch.count("sitl_instance.launch"),3)
+        self.assertEqual(instance.count("single_vehicle_lidar_spawn.launch"),1)
         aggregator=(ROOT/"scripts"/"lidar_cloud_aggregator").read_text(encoding="utf-8")
         self.assertIn('"/perception/lidar_points",PointCloud2',aggregator)
 

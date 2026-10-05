@@ -2,7 +2,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
-import re
 import runpy
 import tempfile
 
@@ -57,31 +56,35 @@ class SitlPreflightTest(unittest.TestCase):
         self.assertTrue(values)
         self.assertEqual(set(values), {'$(arg vehicle_count)'})
         sitl = ET.parse(str(PACKAGE / 'launch/three_uav_sitl.launch')).getroot()
-        self.assertEqual([group.get('ns') for group in sitl.iter('group')],
-                         ['uav0', 'uav1', 'uav2'])
+        instances = [include for include in sitl.findall('include')
+                     if 'sitl_instance.launch' in include.get('file', '')]
+        self.assertEqual([next(arg.get('value') for arg in include.findall('arg')
+                               if arg.get('name') == 'instance_id')
+                          for include in instances], ['0', '1', '2'])
 
     def test_preflight_ports_match_roslaunch_defaults(self):
         mission = ET.parse(str(PACKAGE / 'launch/three_uav_mission.launch')).getroot()
         master = next(arg.get('default') for arg in mission.iter('arg')
                       if arg.get('name') == 'gazebo_master_uri')
         self.assertEqual(preflight.gazebo_master_port(master), 11450)
-        sitl = ET.parse(str(PACKAGE / 'launch/three_uav_sitl.launch')).getroot()
-        collected = {key: [] for key in preflight.FIXED_PORTS}
-        for group in sitl.iter('group'):
-            includes = list(group.findall('include'))
-            self.assertEqual(len(includes), 2)
-            spawn = {arg.get('name'): arg.get('value')
-                     for arg in includes[0].findall('arg')}
-            mavros = {arg.get('name'): arg.get('value')
-                      for arg in includes[1].findall('arg')}
-            collected['gazebo_mavlink_udp'].append(int(spawn['mavlink_udp_port']))
-            collected['px4_mavlink_tcp'].append(int(spawn['mavlink_tcp_port']))
-            match = re.fullmatch(r'udp://:(\d+)@localhost:(\d+)', mavros['fcu_url'])
-            self.assertIsNotNone(match)
-            collected['mavros_udp'].append(int(match.group(1)))
-            collected['fcu_remote_udp'].append(int(match.group(2)))
-        self.assertEqual({key: tuple(values) for key, values in collected.items()},
-                         preflight.FIXED_PORTS)
+        instance = ET.parse(str(PACKAGE / 'launch/sitl_instance.launch')).getroot()
+        group = instance.find('group')
+        self.assertEqual(group.get('ns'), "$(eval 'uav' + str(int(arg('instance_id'))))")
+        includes = list(group.findall('include'))
+        self.assertEqual(len(includes), 2)
+        spawn = {arg.get('name'): arg.get('value') for arg in includes[0].findall('arg')}
+        mavros = {arg.get('name'): arg.get('value') for arg in includes[1].findall('arg')}
+        self.assertEqual(spawn['mavlink_udp_port'], "$(eval 14560 + int(arg('instance_id')))")
+        self.assertEqual(spawn['mavlink_tcp_port'], "$(eval 4560 + int(arg('instance_id')))")
+        self.assertEqual(mavros['fcu_url'],
+                         "$(eval 'udp://:' + str(14540 + int(arg('instance_id'))) + '@localhost:' + str(14580 + int(arg('instance_id'))))")
+        self.assertEqual(mavros['tgt_system'], "$(eval 1 + int(arg('instance_id')))")
+        self.assertEqual(preflight.FIXED_PORTS, {
+            'mavros_udp': (14540, 14541, 14542),
+            'gazebo_mavlink_udp': (14560, 14561, 14562),
+            'px4_mavlink_tcp': (4560, 4561, 4562),
+            'fcu_remote_udp': (14580, 14581, 14582),
+        })
 
     def test_resource_snapshot_respects_cgroup_caps(self):
         files = {'/sys/fs/cgroup/cpu.max': '200000 100000',

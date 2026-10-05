@@ -22,7 +22,7 @@ source /home/devuser/catkin_ws/devel/setup.bash
 /home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/launch_outdoor_checked --world outdoor_campus --gui true
 ```
 
-该入口只选择三个已验证的自建室外世界，默认不自动起飞；`--dry-run` 不启动 ROS/Gazebo。预检还验证世界 SDF/元数据及三机出生位、当前可用 CPU/内存和默认端口；它只检查启动前瞬时状态，不保留端口，也不能替代三机任务验收。若覆盖 `gazebo_master_uri`，须以相同 URI 运行预检。五至八机还没有实际 PX4 实例，预检会拒绝这类配置。
+该入口只选择三个已验证的自建室外世界，默认不自动起飞；`--dry-run` 不启动 ROS/Gazebo。预检还验证世界 SDF/元数据及三机出生位、当前可用 CPU/内存和默认端口；它只检查启动前瞬时状态，不保留端口，也不能替代三机任务验收。若覆盖 `gazebo_master_uri`，须以相同 URI 运行预检。`sitl_instance.launch` 已将单实例的命名空间、PX4/MAVROS 系统号和端口统一由 ID 推导；三机入口仍只使用 ID 0～2。五至八机任务和实飞尚未实现，预检会拒绝这类配置。
 
 ## 算法链路
 
