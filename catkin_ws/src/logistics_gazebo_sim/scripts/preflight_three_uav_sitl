@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Check the current three-PX4 launch before starting Gazebo or MAVROS."""
+
+import argparse
+import json
+from pathlib import Path
+
+from logistics_gazebo_sim.sitl_preflight import preflight
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--world', default='scene_0',
+                        choices=('scene_0', 'outdoor_campus',
+                                 'outdoor_residential', 'outdoor_urban'))
+    parser.add_argument('--world-dir', type=Path,
+                        default=Path(__file__).resolve().parent.parent / 'worlds')
+    parser.add_argument('--vehicle-count', type=int, default=3)
+    parser.add_argument('--gazebo-master-uri',
+                        default='http://127.0.0.1:11450')
+    args = parser.parse_args()
+    result = preflight(args.world, args.world_dir, args.vehicle_count,
+                       args.gazebo_master_uri)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if result['pass'] else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

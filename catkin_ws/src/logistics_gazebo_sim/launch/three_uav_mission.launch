@@ -14,7 +14,10 @@
   <arg name="goal_y" default="45.0"/>
   <arg name="dynamic_obstacles" default="false"/>
   <arg name="dynamic_avoidance_execution" default="false"/>
+  <!-- Exactly three PX4/MAVROS instances are launched below. A different
+       vehicle_count must fail during roslaunch parsing, not silently run 3. -->
   <arg name="vehicle_count" default="3"/>
+  <arg name="vehicle_count_guard" value="$(eval 'ok' if int(arg('vehicle_count')) == 3 else int('three_uav_mission supports exactly three PX4 instances'))"/>
   <arg name="local_avoidance_algorithm" default="collective_offset"/>
   <arg name="orca_control_mode" default="shadow"/>
   <arg name="orca_command_timeout_s" default="0.6"/>

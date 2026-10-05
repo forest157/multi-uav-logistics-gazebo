@@ -6,6 +6,17 @@
 
 当前稳定标签为 `v0.5.12`；ROS 与 Python 包元数据均为 `0.5.12`。园区、住宅、街区三个室外世界通过统一的世界配置提供米制边界和静态建筑占据。`v0.5.12` 系列总验收见仓库根目录 `ROADMAP.md` 和 `reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md`。
 
+## v0.6.0 开发中的启动预检
+
+现有 `three_uav_mission.launch` 实际只启动三套 PX4/MAVROS；现在 `vehicle_count:=5/8` 会在 roslaunch 解析时明确失败，不再让任务侧和飞控侧数量不一致。启动三机室外任务前可运行：
+
+```bash
+source /home/devuser/catkin_ws/devel/setup.bash
+/home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/preflight_three_uav_sitl --world outdoor_campus
+```
+
+预检验证世界 SDF/元数据及三机出生位、当前可用 CPU/内存和默认端口；它只检查启动前瞬时状态，不保留端口，也不能替代三机任务验收。若覆盖 `gazebo_master_uri`，须以相同 URI 运行预检。五至八机还没有实际 PX4 实例，预检会拒绝这类配置。
+
 ## 算法链路
 
 当前主线算法链路为：
