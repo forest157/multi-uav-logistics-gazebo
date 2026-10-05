@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Preflight a three-UAV outdoor world, then launch its lidar trial."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import rospkg
+
+from logistics_gazebo_sim.sitl_preflight import preflight
+
+
+WORLDS = ('outdoor_campus', 'outdoor_residential', 'outdoor_urban')
+
+
+def launch_command(world, gui, master_uri):
+    if world not in WORLDS or gui not in ('true', 'false'):
+        raise ValueError('unsupported outdoor launch configuration')
+    return ['roslaunch', 'logistics_gazebo_sim', world + '_lidar_trial.launch',
+            'gui:=' + gui, 'gazebo_master_uri:=' + master_uri]
+
+
+def ros_environment(px4_root, environ):
+    px4_root = Path(px4_root)
+    gazebo = px4_root / 'Tools/sitl_gazebo'
+    if not (px4_root / 'package.xml').is_file() or not (gazebo / 'package.xml').is_file():
+        raise ValueError('PX4 and mavlink_sitl_gazebo ROS packages are missing')
+    result = dict(environ)
+    paths = [str(gazebo), str(px4_root)]
+    if result.get('ROS_PACKAGE_PATH'):
+        paths.append(result['ROS_PACKAGE_PATH'])
+    result['ROS_PACKAGE_PATH'] = os.pathsep.join(paths)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--world', choices=WORLDS, required=True)
+    parser.add_argument('--gui', choices=('true', 'false'), default='true')
+    parser.add_argument('--gazebo-master-uri',
+                        help='override the selected launch file default')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='check and print command without starting ROS')
+    args = parser.parse_args()
+    package = Path(rospkg.RosPack().get_path('logistics_gazebo_sim'))
+    result = preflight(args.world, package / 'worlds',
+                       gazebo_master_uri=args.gazebo_master_uri)
+    if not result['pass']:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 1
+    try:
+        command = launch_command(args.world, args.gui, result['gazebo_master_uri'])
+        environment = ros_environment(Path.home() / 'PX4_Firmware', os.environ)
+        if shutil.which('roslaunch') is None:
+            raise ValueError('roslaunch is not on PATH')
+    except ValueError as exc:
+        result['pass'] = False
+        result['errors'].append(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 1
+    result['launch_command'] = command
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), flush=True)
+    if not args.dry_run:
+        os.execvpe(command[0], command, environment)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

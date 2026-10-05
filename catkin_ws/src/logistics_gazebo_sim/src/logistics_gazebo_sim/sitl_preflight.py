@@ -9,6 +9,7 @@ from pathlib import Path
 import socket
 from urllib.parse import urlparse
 import math
+import xml.etree.ElementTree as ET
 
 
 SUPPORTED_VEHICLE_COUNT = 3
@@ -59,6 +60,24 @@ def gazebo_master_port(uri):
     if parsed.port is None or not 1 <= parsed.port <= 65535:
         raise ValueError('Gazebo master port is invalid')
     return parsed.port
+
+
+def default_master_uri(world, world_dir):
+    """Read the selected mission launch, not an unrelated generic default."""
+    if world == 'scene_0':
+        filename = 'three_uav_mission.launch'
+    elif world in ('outdoor_campus', 'outdoor_residential', 'outdoor_urban'):
+        filename = world + '_lidar_trial.launch'
+    else:
+        raise ValueError('world has no supported launch entry: ' + world)
+    path = Path(world_dir).resolve().parent / 'launch' / filename
+    root = ET.parse(str(path)).getroot()
+    values = [arg.get('default') for arg in root.findall('arg')
+              if arg.get('name') == 'gazebo_master_uri']
+    if len(values) != 1 or not values[0]:
+        raise ValueError('launch has no unique Gazebo master default: ' + filename)
+    gazebo_master_port(values[0])
+    return values[0]
 
 
 def launch_ports(master_port):
@@ -122,21 +141,23 @@ def world_spawn_capacity(world, world_dir):
     return len(profile['spawn_positions_m'])
 
 
-def preflight(world, world_dir, vehicle_count=3,
-              gazebo_master_uri='http://127.0.0.1:11450'):
+def preflight(world, world_dir, vehicle_count=3, gazebo_master_uri=None):
     """Return a report; never claim that a physical flight has been tested."""
     errors = []
     capacity = 0
     ports = []
+    resolved_uri = None
     cpu_cores = free_mib = 0.0
     try:
         capacity = world_spawn_capacity(world, world_dir)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         errors.append('world validation failed: {}'.format(exc))
     try:
-        ports = launch_ports(gazebo_master_port(gazebo_master_uri))
-    except ValueError as exc:
-        errors.append(str(exc))
+        resolved_uri = (default_master_uri(world, world_dir) if gazebo_master_uri is None
+                        else gazebo_master_uri)
+        ports = launch_ports(gazebo_master_port(resolved_uri))
+    except (OSError, ValueError, ET.ParseError) as exc:
+        errors.append('launch port validation failed: {}'.format(exc))
     try:
         cpu_cores, free_mib = resource_snapshot()
     except (OSError, ValueError, RuntimeError, ZeroDivisionError) as exc:
@@ -144,6 +165,7 @@ def preflight(world, world_dir, vehicle_count=3,
     errors.extend(evaluate_preflight(vehicle_count, capacity, cpu_cores,
                                      free_mib, ports))
     return {'pass': not errors, 'world': world, 'vehicle_count': vehicle_count,
+            'gazebo_master_uri': resolved_uri,
             'world_spawn_capacity': capacity, 'available_cpu_cores': cpu_cores,
             'available_memory_mib': free_mib, 'ports_checked': len(ports),
             'errors': errors, 'scope': 'prelaunch-only; ports are not reserved'}

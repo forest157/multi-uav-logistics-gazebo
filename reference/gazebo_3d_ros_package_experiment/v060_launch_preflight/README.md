@@ -13,6 +13,8 @@ source /home/devuser/catkin_ws/devel/setup.bash
 /home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/preflight_three_uav_sitl --world outdoor_campus
 ```
 
-只针对默认端口矩阵和本地 `gazebo_master_uri`；修改启动端口后要同步扩展预检。当前 `scene_0` 只检查旧世界文件存在与固定三机容量，自建室外世界才执行几何一致性验证。预检是独立 CLI，直接调用原始 `roslaunch` 可以绕过资源/端口检查；真正启动前应先运行它。下一阶段要把 PX4 实例、端口、命名空间和出生位置统一参数化，建立不可绕过的安全入口，再按一机、三机、五机、八机逐级仿真验证。
+预检从选中的 launch 文件读取 `gazebo_master_uri`：通用三机任务默认 `11450`，三个室外 lidar 试验入口默认 `11470`。前一阶段固定检查 `11450` 会漏掉实际室外入口端口；现已修正并加回归测试。可用 `launch_outdoor_checked --world outdoor_campus --dry-run` 只检查、不启动；去掉 `--dry-run` 才会执行相应的室外 lidar 试验 launch。该入口不接受任意 launch 参数或 Baylands 世界，且沿用原启动文件的 `auto_start=false`，不会自动起飞。
 
-2026-10-05 本机验证：园区、住宅、街区的预检均 `pass: true`，各识别 3 个出生位并检查 13 个端口；`--vehicle-count 5` 返回非零，`roslaunch --nodes ... vehicle_count:=5` 在解析阶段返回非零，`vehicle_count:=3` 正常列出 3 个 MAVROS 节点。260 项 Python 回归测试及四包 catkin 构建通过。尚未为本分支重新运行完整 Gazebo 飞行，不能把本阶段标为五至八机验收。
+只针对当前固定的三机端口矩阵和本地 `gazebo_master_uri`；修改 PX4/MAVROS 端口后要同步扩展预检。当前 `scene_0` 只检查旧世界文件存在与固定三机容量，自建室外世界才执行几何一致性验证。直接调用原始 `roslaunch` 仍可绕过资源/端口检查；推荐使用检查后启动入口。下一阶段要把 PX4 实例、端口、命名空间和出生位置统一参数化，再按一机、三机、五机、八机逐级仿真验证。
+
+2026-10-05 本机验证：园区、住宅、街区的预检均 `pass: true`，各识别 3 个出生位并检查 13 个端口；`--vehicle-count 5` 返回非零，`roslaunch --nodes ... vehicle_count:=5` 在解析阶段返回非零，`vehicle_count:=3` 正常列出 3 个 MAVROS 节点。修正端口后，三个室外 `launch_outdoor_checked --dry-run` 均通过并指向 `11470` 与对应 lidar launch；旧 `scene_0` 正确指向 `11450`。262 项 Python 回归测试及四包 catkin 构建通过。尚未为本分支重新运行完整 Gazebo 飞行，不能把本阶段标为五至八机验收。

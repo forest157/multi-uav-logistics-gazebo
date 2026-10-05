@@ -3,6 +3,8 @@ from pathlib import Path
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import re
+import runpy
+import tempfile
 
 from logistics_gazebo_sim import sitl_preflight as preflight
 
@@ -97,6 +99,38 @@ class SitlPreflightTest(unittest.TestCase):
         for uri in ('http://remote:11450', 'http://127.0.0.1', 'not-a-uri'):
             with self.assertRaises(ValueError):
                 preflight.gazebo_master_port(uri)
+
+    def test_selected_launch_default_is_checked(self):
+        worlds = PACKAGE / 'worlds'
+        self.assertEqual(preflight.default_master_uri('scene_0', worlds),
+                         'http://127.0.0.1:11450')
+        for name in ('outdoor_campus', 'outdoor_residential', 'outdoor_urban'):
+            self.assertEqual(preflight.default_master_uri(name, worlds),
+                             'http://127.0.0.1:11470')
+        with patch.object(preflight, 'evaluate_preflight', return_value=[]) as check, \
+                patch.object(preflight, 'resource_snapshot', return_value=(8.0, 20000.0)):
+            result = preflight.preflight('outdoor_campus', worlds)
+        self.assertTrue(result['pass'])
+        self.assertEqual(result['gazebo_master_uri'], 'http://127.0.0.1:11470')
+        self.assertEqual(check.call_args.args[4][0], ('tcp', 'gazebo_master', 11470))
+
+    def test_checked_wrapper_maps_world_without_shell(self):
+        wrapper = runpy.run_path(str(PACKAGE / 'scripts/launch_outdoor_checked'))
+        command = wrapper['launch_command']('outdoor_urban', 'false',
+                                            'http://127.0.0.1:11470')
+        self.assertEqual(command, ['roslaunch', 'logistics_gazebo_sim',
+                                   'outdoor_urban_lidar_trial.launch', 'gui:=false',
+                                   'gazebo_master_uri:=http://127.0.0.1:11470'])
+        with self.assertRaises(ValueError):
+            wrapper['launch_command']('baylands', 'true', 'http://127.0.0.1:11470')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'Tools/sitl_gazebo').mkdir(parents=True)
+            (root / 'package.xml').write_text('', encoding='utf-8')
+            (root / 'Tools/sitl_gazebo/package.xml').write_text('', encoding='utf-8')
+            environment = wrapper['ros_environment'](root, {'ROS_PACKAGE_PATH': '/ros'})
+            self.assertEqual(environment['ROS_PACKAGE_PATH'].split(':'),
+                             [str(root / 'Tools/sitl_gazebo'), str(root), '/ros'])
 
 
 if __name__ == '__main__':

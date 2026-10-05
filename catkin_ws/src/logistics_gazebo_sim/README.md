@@ -15,7 +15,14 @@ source /home/devuser/catkin_ws/devel/setup.bash
 /home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/preflight_three_uav_sitl --world outdoor_campus
 ```
 
-预检验证世界 SDF/元数据及三机出生位、当前可用 CPU/内存和默认端口；它只检查启动前瞬时状态，不保留端口，也不能替代三机任务验收。若覆盖 `gazebo_master_uri`，须以相同 URI 运行预检。五至八机还没有实际 PX4 实例，预检会拒绝这类配置。
+预检从选中的 launch 文件读取 Gazebo 端口：室外试验默认 `11470`，通用三机任务默认 `11450`，不会检查错误的入口。也可使用检查后直接启动的入口：
+
+```bash
+/home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/launch_outdoor_checked --world outdoor_campus --dry-run
+/home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/launch_outdoor_checked --world outdoor_campus --gui true
+```
+
+该入口只选择三个已验证的自建室外世界，默认不自动起飞；`--dry-run` 不启动 ROS/Gazebo。预检还验证世界 SDF/元数据及三机出生位、当前可用 CPU/内存和默认端口；它只检查启动前瞬时状态，不保留端口，也不能替代三机任务验收。若覆盖 `gazebo_master_uri`，须以相同 URI 运行预检。五至八机还没有实际 PX4 实例，预检会拒绝这类配置。
 
 ## 算法链路
 
