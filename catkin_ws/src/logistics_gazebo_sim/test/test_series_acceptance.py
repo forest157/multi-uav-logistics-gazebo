@@ -106,7 +106,7 @@ class SeriesAcceptanceTest(unittest.TestCase):
             '<package><version>0.5.12</version></package>', encoding='utf-8')
         (self.root / 'setup.py').write_text("version='0.5.12'", encoding='utf-8')
         (self.root / 'draft.md').write_text(
-            'v0.5.12 未发布；双鸟暂缓，Baylands 仅导入，净空为抽样。', encoding='utf-8')
+            'v0.5.12 发布；双鸟暂缓，Baylands 仅导入，物理净空为抽样。', encoding='utf-8')
         self.manifest = dict(release='v0.5.12', baseline_tag='v0.5.11',
                              minimum_runs_per_world=2, worlds=worlds,
                              single_bird=dict(world='outdoor_campus',
@@ -234,16 +234,16 @@ class SeriesAcceptanceTest(unittest.TestCase):
         self.assertFalse(result['passed'])
         self.assertIn('versions do not match', str(result['checks']))
 
-    def test_release_draft_must_disclose_scope(self):
+    def test_release_notes_must_disclose_scope(self):
         self.manifest['release_document'] = 'draft.md'
         (self.root / 'draft.md').write_text(
-            'v0.5.12 未发布；双鸟暂缓，Baylands 仅导入，净空为抽样。',
+            'v0.5.12 发布；双鸟暂缓，Baylands 仅导入，物理净空为抽样。',
             encoding='utf-8')
         self.assertTrue(audit_manifest(self.root, self.manifest)['passed'])
         (self.root / 'draft.md').write_text('v0.5.12', encoding='utf-8')
         result = audit_manifest(self.root, self.manifest)
         self.assertFalse(result['passed'])
-        self.assertIn('release draft omits', str(result['checks']))
+        self.assertIn('release notes omit', str(result['checks']))
 
 
 if __name__ == '__main__':

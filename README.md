@@ -18,7 +18,7 @@
 
 ## 当前版本
 
-当前稳定基线为 `v0.5.11`，`main` 使用统一单一 ROS 包。园区、住宅和街区三个真实尺度自建室外世界均完成三机物理雷达投递返航验收；ORCA 仅在安全门约束下受限接管，分布式 MPC 仍保持影子模式。导入的 Baylands 世界仅完成资产、许可证、碰撞体及空载加载核验，**尚未接入三机自动飞行**。
+当前稳定基线为 `v0.5.12`，`main` 使用统一单一 ROS 包。园区、住宅和街区三个真实尺度自建室外世界均完成三机物理雷达投递返航验收，并通过[系列总验收](reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md)；ORCA 仅在安全门约束下受限接管，分布式 MPC 仍保持影子模式。导入的 Baylands 世界仅完成资产、许可证、碰撞体及空载加载核验，**尚未接入三机自动飞行**。
 
 ## 仿真画面
 
@@ -58,7 +58,7 @@ source /home/devuser/catkin_ws/devel/setup.bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover -s test -q
 ```
 
-`v0.5.11` 发布前通过 239 项 Python 回归测试与 `catkin build logistics_gazebo_sim`。完整 Gazebo 飞行和保守真值净空审计见 [仿真图片展示](docs/SIMULATION_GALLERY.md) 所链接的报告；单元测试不能代替飞行验收。
+`v0.5.12` 发布前通过 252 项 Python 回归测试、四包 catkin 构建和 22/22 项系列技术门。完整 Gazebo 飞行和保守真值净空审计见[系列总验收](reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md)；单元测试不能代替飞行验收。
 
 ## 恢复历史版本
 

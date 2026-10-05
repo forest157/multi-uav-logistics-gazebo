@@ -339,11 +339,11 @@ def audit_manifest(root, manifest):
         errors = []
         try:
             content = _safe_file(root, document).read_text(encoding='utf-8')
-            for phrase in (manifest['release'], '未发布', '双鸟', 'Baylands', '抽样'):
+            for phrase in (manifest['release'], '双鸟', 'Baylands', '抽样', '物理'):
                 if phrase not in content:
-                    errors.append('release draft omits ' + phrase)
+                    errors.append('release notes omit ' + phrase)
         except (OSError, ValueError, KeyError) as exc:
-            errors.append('release draft unavailable: {}'.format(exc))
+            errors.append('release notes unavailable: {}'.format(exc))
         checks.append(dict(id='release_document', passed=not errors,
                            errors=errors))
     for item in manifest.get('pending_checks', []):

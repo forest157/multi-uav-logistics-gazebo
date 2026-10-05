@@ -4,7 +4,7 @@
 
 `~/catkin_ws/src/logistics_gazebo_sim` 是当前唯一主包，ROS 包名为 `logistics_gazebo_sim`。原稳定版与实验版已经统一，旧实现保留在 Git 历史标签中，不再通过两个互相依赖的包并行维护。
 
-当前稳定标签为 `v0.5.11`；本分支的包元数据使用尚未发布的 `0.5.12` 候选版本。园区、住宅、街区三个室外世界通过统一的世界配置提供米制边界和静态建筑占据。`v0.5.12` 系列总验收进度见仓库根目录 `ROADMAP.md` 和 `reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/README.md`。
+当前稳定标签为 `v0.5.12`；ROS 与 Python 包元数据均为 `0.5.12`。园区、住宅、街区三个室外世界通过统一的世界配置提供米制边界和静态建筑占据。`v0.5.12` 系列总验收见仓库根目录 `ROADMAP.md` 和 `reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md`。
 
 ## 算法链路
 

@@ -1,6 +1,6 @@
-# v0.5.12 发布说明草稿（未发布）
+# v0.5.12 发布说明
 
-本候选版为 0.5 系列的限定范围总验收：以三机 PX4 SITL、ROS Noetic、Gazebo Classic、自建室外世界和物理激光雷达为对象，汇总感知、动态避障、安全联锁、能量返航、真实尺度场景与资源预算。当前稳定版仍是 `v0.5.11`；本文件不是发布公告，尚未合并 `main` 或创建 `v0.5.12` 标签。
+本版本为 0.5 系列的限定范围总验收：以三机 PX4 SITL、ROS Noetic、Gazebo Classic、自建室外世界和物理激光雷达为对象，汇总感知、动态避障、安全联锁、能量返航、真实尺度场景与资源预算。稳定标签为 `v0.5.12`；本说明仅适用于下述已验证范围。
 
 ## 本轮复核
 
@@ -25,7 +25,7 @@
 - 电池系数仍是仿真基线，未做真实电池标定；资源预算只是一段 30 秒 headless 窗口，不代表长时或 GUI 性能。
 - Gazebo Classic 环境为现有仿真基线；本版不声明实机适航或真实世界防撞保证。
 
-## 复核命令与发布条件
+## 复核命令
 
 ```bash
 source /home/devuser/catkin_ws/devel/setup.bash
@@ -35,4 +35,4 @@ catkin build logistics_gazebo_sim --no-status
 /home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/audit_series_acceptance
 ```
 
-只有候选版技术门通过、工作区干净、用户确认最终结果后，才考虑合并 `main`、创建 `v0.5.12` 标签和推送 GitHub。版本标签不可移动；发布前不得把本草稿或机器检查通过误写成已经发布。
+版本标签不可移动。技术门通过证明的是这些保存证据满足预先声明的阈值，不扩展上文的能力边界。

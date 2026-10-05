@@ -47,7 +47,7 @@
     "package_xml": "catkin_ws/src/logistics_gazebo_sim/package.xml",
     "setup_py": "catkin_ws/src/logistics_gazebo_sim/setup.py"
   },
-  "release_document": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE_DRAFT.md",
+  "release_document": "reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md",
   "pending_checks": [],
   "exclusions": [
     "User-deferred two-bird closed-loop flight is not part of this release gate.",
