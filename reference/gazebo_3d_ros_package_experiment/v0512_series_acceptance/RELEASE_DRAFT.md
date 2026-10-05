@@ -14,7 +14,7 @@
 
 六轮三机均完成投递、返航与降落，飞行样本的真值/雷达/安全消息全新鲜，零无鸟误目标、零意外避障、零安全 ERROR，三机解除武装。园区另一次单鸟任务测得鸟机球包络净空最小 1.620 m、ORCA 接管 503 帧，同样完成并解除武装。逐次报告与世界 SHA-256 见本目录 `*_run*.json` 和已发布 `v0.5.11` 的 GUI 重跑审计。
 
-六场景离线感知矩阵在本分支复跑 6/6 通过，包含空域、噪声、长短遮挡、双目标交叉及断流动作顺序；另复核既有完整雷达断流飞行报告。能量模型、LOW/CRITICAL 返航建议、临界备用落点、错峰下降及 2.5 m 近距安全联锁分别在隔离 ROS 试验中重跑通过。园区全栈活跃巡航 30 秒的预设门槛通过：实时率 0.874 ≥ 0.8、CPU 1.498 ≤ 8 核、抽样 PSS 7239.5 ≤ 12288 MiB。249 项 Python 回归测试及四包 catkin 构建通过，无构建警告。
+六场景离线感知矩阵在本分支复跑 6/6 通过，包含空域、噪声、长短遮挡、双目标交叉及断流动作顺序；另复核既有完整雷达断流飞行报告。能量模型、LOW/CRITICAL 返航建议、临界备用落点、错峰下降及 2.5 m 近距安全联锁分别在隔离 ROS 试验中重跑通过。园区全栈活跃巡航 30 秒的预设门槛通过：实时率 0.874 ≥ 0.8、CPU 1.498 ≤ 8 核、抽样 PSS 7239.5 ≤ 12288 MiB。验收清单结构也强制要求三世界、两轮、感知、能量/安全、资源及版本/文档证据，防止删项或降低复测门槛后误通过。252 项 Python 回归测试及四包 catkin 构建通过，无构建警告。
 
 ## 能力边界
 
@@ -30,6 +30,7 @@
 ```bash
 source /home/devuser/catkin_ws/devel/setup.bash
 python3 -m unittest discover -s /home/devuser/catkin_ws/src/logistics_gazebo_sim/test -q
+cd /home/devuser/catkin_ws
 catkin build logistics_gazebo_sim --no-status
 /home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/audit_series_acceptance
 ```

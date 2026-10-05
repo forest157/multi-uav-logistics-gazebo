@@ -28,20 +28,29 @@ def _at_most(report, key, limit, errors):
         errors.append('{} > {}'.format(key, limit))
 
 
+def _count(report, key, errors, maximum=None):
+    value = report.get(key)
+    if (not isinstance(value, int) or isinstance(value, bool) or value < 0 or
+            (maximum is not None and value > maximum)):
+        errors.append('{} is not a valid count'.format(key))
+
+
 def evaluate_flight(report, kind):
     """Re-evaluate numeric evidence; never accept only a saved passed flag."""
     errors = []
     flight = report.get('flight_samples')
-    if not _number(flight) or flight < 1000:
+    if not isinstance(flight, int) or isinstance(flight, bool) or flight < 1000:
         errors.append('insufficient flight_samples')
     else:
         for key in ('valid_truth_samples', 'fresh_lidar_samples',
                     'fresh_safety_samples'):
+            _count(report, key, errors, flight)
             _at_least(report, key, 0.95 * flight, errors)
     _at_least(report, 'minimum_truth_separation_m', 3.0, errors)
-    _at_least(report, 'minimum_truth_static_clearance_m', 0.0, errors)
+    _at_least(report, 'minimum_truth_static_clearance_m', 0.1, errors)
     _at_most(report, 'maximum_estimate_error_m', 1.0, errors)
     _at_most(report, 'maximum_settled_vertical_error_m', 1.0, errors)
+    _count(report, 'safety_error_samples', errors)
     _at_most(report, 'safety_error_samples', 0, errors)
     if report.get('complete') is not True or report.get('disarmed') is not True:
         errors.append('mission not complete and disarmed')
@@ -50,10 +59,14 @@ def evaluate_flight(report, kind):
     if kind == 'no_bird':
         for key in ('maximum_lidar_confirmed_targets', 'bird_truth_samples',
                     'unexpected_avoidance_samples'):
+            _count(report, key, errors)
             _at_most(report, key, 0, errors)
     elif kind == 'single_bird':
+        for key in ('bird_truth_samples', 'maximum_lidar_confirmed_targets',
+                    'active_orca_samples'):
+            _count(report, key, errors)
         _at_least(report, 'bird_truth_samples', 1, errors)
-        _at_least(report, 'minimum_bird_clearance_m', 0.001, errors)
+        _at_least(report, 'minimum_bird_clearance_m', 0.1, errors)
         _at_least(report, 'maximum_lidar_confirmed_targets', 1, errors)
         _at_least(report, 'active_orca_samples', 1, errors)
     else:
@@ -155,11 +168,69 @@ def _load(root, relative):
         return json.load(stream)
 
 
+def validate_manifest(manifest):
+    """Reject omitted evidence groups and weakened repeat requirements."""
+    errors = []
+    if not isinstance(manifest, dict):
+        return ['manifest must be an object']
+    if manifest.get('release') != 'v0.5.12' or manifest.get('baseline_tag') != 'v0.5.11':
+        errors.append('release or baseline identity changed')
+    minimum = manifest.get('minimum_runs_per_world')
+    if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 2:
+        errors.append('minimum_runs_per_world must be at least 2')
+    worlds = manifest.get('worlds')
+    required_worlds = {'outdoor_campus', 'outdoor_residential', 'outdoor_urban'}
+    if not isinstance(worlds, dict) or set(worlds) != required_worlds:
+        errors.append('required outdoor worlds missing or changed')
+    else:
+        for world, spec in worlds.items():
+            if (not isinstance(spec, dict) or
+                    not isinstance(spec.get('world_sha256'), str) or
+                    len(spec['world_sha256']) != 64 or
+                    not isinstance(spec.get('no_bird_reports'), list) or
+                    len(spec['no_bird_reports']) < 2 or
+                    not all(isinstance(item, str) and item for item in spec['no_bird_reports'])):
+                errors.append('invalid world evidence specification: ' + world)
+    bird = manifest.get('single_bird')
+    if (not isinstance(bird, dict) or bird.get('world') != 'outdoor_campus' or
+            not isinstance(bird.get('report'), str) or not bird['report']):
+        errors.append('campus single-bird evidence missing')
+    perception = manifest.get('perception')
+    if (not isinstance(perception, dict) or set(perception) != {'matrix', 'dropout'} or
+            not all(isinstance(value, str) and value for value in perception.values())):
+        errors.append('perception evidence group incomplete')
+    energy = manifest.get('energy_and_safety')
+    if (not isinstance(energy, dict) or
+            set(energy) != {'model', 'return', 'landing', 'interlock'} or
+            not all(isinstance(value, str) and value for value in energy.values())):
+        errors.append('energy and safety evidence group incomplete')
+    budget = manifest.get('resource_budget')
+    if (not isinstance(budget, dict) or set(budget) != {'limits', 'report'} or
+            not all(isinstance(value, str) and value for value in budget.values())):
+        errors.append('resource budget evidence group incomplete')
+    metadata = manifest.get('version_metadata')
+    if (not isinstance(metadata, dict) or set(metadata) != {'package_xml', 'setup_py'} or
+            not all(isinstance(value, str) and value for value in metadata.values())):
+        errors.append('version metadata evidence group incomplete')
+    if not isinstance(manifest.get('release_document'), str) or not manifest['release_document']:
+        errors.append('release document missing')
+    if not isinstance(manifest.get('pending_checks'), list):
+        errors.append('pending_checks must be an explicit list')
+    if not isinstance(manifest.get('exclusions'), list):
+        errors.append('exclusions must be an explicit list')
+    return errors
+
+
 def audit_manifest(root, manifest):
     """Return machine-readable pass/fail with every missing evidence item."""
     root = Path(root).resolve()
+    schema_errors = validate_manifest(manifest)
+    if schema_errors:
+        return dict(release=manifest.get('release') if isinstance(manifest, dict) else None,
+                    passed=False, checks=[dict(id='manifest_schema', passed=False,
+                                               errors=schema_errors)], exclusions=[])
     checks = []
-    minimum_runs = manifest.get('minimum_runs_per_world', 2)
+    minimum_runs = manifest['minimum_runs_per_world']
     for world, spec in sorted(manifest['worlds'].items()):
         world_path = 'catkin_ws/src/logistics_gazebo_sim/worlds/{}.world'.format(world)
         try:

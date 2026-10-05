@@ -9,7 +9,7 @@ source /home/devuser/catkin_ws/devel/setup.bash
 /home/devuser/catkin_ws/src/logistics_gazebo_sim/scripts/audit_series_acceptance
 ```
 
-程序按 `manifest.json` 核对世界文件 SHA-256、每份飞行报告的真值/雷达/安全消息覆盖率、机间距、静态净空、稳定高度误差、误检/误避障、任务完成与解除武装；单鸟另需鸟机净空、雷达确认和 ORCA 接管。资源指标重新对照预先声明的预算，不只信任报告中的 `passed` 字段。每个世界暂要求至少两次不同采集身份的完整无鸟任务，缺少证据时返回非零状态。
+程序先检查清单结构，强制保留三世界、每世界至少两轮、单鸟、感知、能量/安全、资源预算、版本和发布文档证据；删项或将两轮门槛降为一轮会失败。然后按 `manifest.json` 核对世界文件 SHA-256、每份飞行报告的真值/雷达/安全消息覆盖率、机间距、正静态净空、稳定高度误差、误检/误避障、任务完成与解除武装；单鸟另需鸟机净空、雷达确认和 ORCA 接管。负数/超出总帧数的计数也会失败。资源指标重新对照预先声明的预算，不只信任报告中的 `passed` 字段。每个世界要求至少两次不同采集身份的完整无鸟任务，缺少证据时返回非零状态。
 
 `campus_no_bird_run1.json`、`residential_no_bird_run1.json`、`urban_no_bird_run1.json`、`campus_single_bird_run1.json` 是 `v0.5.11` 运行后产生的独立审计摘要副本，原始 JSONL 仍在容器 `/tmp`，不作为仓库版本化资产。园区第二次无鸟证据使用 `v0.5.11` 的 GUI 重跑审计。现有文件只能证明具体运行、具体世界、抽样时刻的保守球包络结果，不是连续碰撞传感器证明或总体可靠性统计。
 

@@ -33,11 +33,22 @@ class SeriesAcceptanceTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        world = self.root / 'catkin_ws/src/logistics_gazebo_sim/worlds/outdoor_campus.world'
-        world.parent.mkdir(parents=True)
-        world.write_text('world', encoding='utf-8')
         digest = hashlib.sha256(b'world').hexdigest()
         self.reports = [flight('run1'), flight('run2'), flight('bird', True)]
+        worlds = {}
+        for name in ('outdoor_campus', 'outdoor_residential', 'outdoor_urban'):
+            world = self.root / ('catkin_ws/src/logistics_gazebo_sim/worlds/' + name + '.world')
+            world.parent.mkdir(parents=True, exist_ok=True)
+            world.write_text('world', encoding='utf-8')
+            if name != 'outdoor_campus':
+                for capture in ('run1', 'run2'):
+                    report = flight(name + capture)
+                    report['world'] = name
+                    self.reports.append(report)
+            first = 0 if name == 'outdoor_campus' else (3 if name == 'outdoor_residential' else 5)
+            worlds[name] = dict(world_sha256=digest,
+                                no_bird_reports=['report{}.json'.format(first),
+                                                 'report{}.json'.format(first + 1)])
         for index, report in enumerate(self.reports):
             report['world_sha256'] = digest
             self.write('report{}.json'.format(index), report)
@@ -52,13 +63,61 @@ class SeriesAcceptanceTest(unittest.TestCase):
                                                          maximum_cpu_cores=8.0,
                                                          maximum_full_stack_pss_mib=12288.0,
                                                          passed=True)))
-        self.manifest = dict(release='v0.5.12', minimum_runs_per_world=2,
-                             worlds={'outdoor_campus': dict(world_sha256=digest,
-                                 no_bird_reports=['report0.json', 'report1.json'])},
+        matrix = dict(pass_=True, case_count=6, cases={
+            'empty_air': dict(pass_=True, track_samples=0),
+            'single_target_noise': dict(pass_=True, unique_ids=['a']),
+            'short_occlusion': dict(pass_=True, before_id='a', after_id='a'),
+            'long_occlusion': dict(pass_=True, before_id='a', after_id='b'),
+            'two_target_crossing': dict(pass_=True, track_ids=['a', 'b']),
+            'perception_stale': dict(pass_=True, actions=['SLOW', 'HOLD', 'HOLD', 'NORMAL']),
+        })
+        matrix['pass'] = matrix.pop('pass_')
+        for case in matrix['cases'].values():
+            case['pass'] = case.pop('pass_')
+        self.write('matrix.json', matrix)
+        self.write('dropout.json', dict(passed=True, complete=True, disarmed=True,
+                  samples=1000, valid_truth_samples=1000, minimum_fleet_separation_m=3.2,
+                  maximum_estimate_error_m=0.4, maximum_settled_vertical_tracking_error_m=0.4,
+                  dropout_slow_samples=1, dropout_hold_samples=1,
+                  dropout_release_guard_samples=1, bird_truth_samples=0,
+                  frames_with_perception_tracks=0, unexpected_avoidance_samples=0,
+                  dropout_recovered=True))
+        energy_fields = {
+            'model': ('complete_requirement_zero', 'forecasts_present',
+                      'mavros_battery_present', 'payload_released', 'used_energy_recorded'),
+            'return': ('alternate_site_present', 'critical_alternate', 'low_return',
+                       'multiple_critical_holds', 'safety_precedence', 'shadow_only',
+                       'slots_present', 'stale_fails_safe'),
+            'landing': ('control_applied', 'critical_diversion_observed',
+                        'home_descent_reached', 'priority_order_observed'),
+            'interlock': ('hold_triggered', 'released', 'targets_locked'),
+        }
+        for name, fields in energy_fields.items():
+            evidence = {'pass': True}
+            evidence.update({field: True for field in fields})
+            if name == 'model':
+                evidence.update(vehicle_count=3, capacities_wh=[1, 1, 1])
+            elif name == 'landing':
+                evidence['target_altitudes'] = [8.0, 7.0, 0.18]
+            elif name == 'interlock':
+                evidence['close_minimum_separation_m'] = 2.5
+            self.write(name + '.json', evidence)
+        (self.root / 'package.xml').write_text(
+            '<package><version>0.5.12</version></package>', encoding='utf-8')
+        (self.root / 'setup.py').write_text("version='0.5.12'", encoding='utf-8')
+        (self.root / 'draft.md').write_text(
+            'v0.5.12 未发布；双鸟暂缓，Baylands 仅导入，净空为抽样。', encoding='utf-8')
+        self.manifest = dict(release='v0.5.12', baseline_tag='v0.5.11',
+                             minimum_runs_per_world=2, worlds=worlds,
                              single_bird=dict(world='outdoor_campus',
                                               report='report2.json'),
+                             perception=dict(matrix='matrix.json', dropout='dropout.json'),
+                             energy_and_safety={name: name + '.json' for name in energy_fields},
                              resource_budget=dict(limits='limits.json',
-                                                  report='resource.json'))
+                                                  report='resource.json'),
+                             version_metadata=dict(package_xml='package.xml',
+                                                   setup_py='setup.py'),
+                             release_document='draft.md', pending_checks=[], exclusions=[])
 
     def write(self, name, value):
         (self.root / name).write_text(json.dumps(value), encoding='utf-8')
@@ -74,6 +133,29 @@ class SeriesAcceptanceTest(unittest.TestCase):
         self.assertFalse(result['passed'])
         self.assertIn('duplicate capture', str(result['checks']))
         self.assertIn('only 1 valid independent runs', str(result['checks']))
+
+    def test_required_evidence_groups_cannot_be_omitted(self):
+        for key in ('worlds', 'single_bird', 'perception', 'energy_and_safety',
+                    'resource_budget', 'version_metadata', 'release_document'):
+            altered = copy.deepcopy(self.manifest)
+            del altered[key]
+            result = audit_manifest(self.root, altered)
+            self.assertFalse(result['passed'], key)
+            self.assertEqual(result['checks'][0]['id'], 'manifest_schema')
+
+    def test_repeat_threshold_cannot_be_weakened(self):
+        self.manifest['minimum_runs_per_world'] = 1
+        result = audit_manifest(self.root, self.manifest)
+        self.assertFalse(result['passed'])
+        self.assertIn('at least 2', str(result['checks']))
+
+    def test_negative_counts_and_zero_clearance_fail(self):
+        report = copy.deepcopy(self.reports[0])
+        report['safety_error_samples'] = -1
+        report['minimum_truth_static_clearance_m'] = 0.0
+        self.assertIn('valid count', str(evaluate_flight(report, 'no_bird')))
+        self.assertIn('minimum_truth_static_clearance_m',
+                      str(evaluate_flight(report, 'no_bird')))
 
     def test_missing_and_path_escape_fail_closed(self):
         self.manifest['worlds']['outdoor_campus']['no_bird_reports'][1] = 'missing.json'
