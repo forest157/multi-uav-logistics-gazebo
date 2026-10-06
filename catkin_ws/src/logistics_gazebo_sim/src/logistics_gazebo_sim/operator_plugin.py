@@ -11,6 +11,7 @@ from geometry_msgs.msg import Point, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim.scenes import SCENES, SCALE, metric_xy
 from logistics_gazebo_sim.fleet_operator_telemetry import validate_snapshot
+from logistics_gazebo_sim.operator_energy_view import validate_energy_advisory
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
@@ -89,7 +90,19 @@ class OperatorPlugin(Plugin):
         self.vehicle_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.vehicle_table.setMinimumHeight(250)
         fleet_layout.addWidget(self.vehicle_summary);fleet_layout.addWidget(self.vehicle_table)
-        root.addWidget(fleet_box);root.addStretch()
+        root.addWidget(fleet_box)
+        energy_box=QGroupBox("返航能量建议 · 只读影子模式");energy_layout=QVBoxLayout(energy_box)
+        self.energy_summary=QLabel("等待能量返航建议")
+        self.energy_table=QTableWidget(0,5)
+        self.energy_table.setHorizontalHeaderLabels(["车辆","级别","预计落地余量","返航槽位","降落顺序"])
+        self.energy_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.energy_table.setSelectionMode(QTableWidget.NoSelection)
+        self.energy_table.setAlternatingRowColors(True)
+        self.energy_table.verticalHeader().setVisible(False)
+        self.energy_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.energy_table.setMinimumHeight(190)
+        energy_layout.addWidget(self.energy_summary);energy_layout.addWidget(self.energy_table)
+        root.addWidget(energy_box);root.addStretch()
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setWidget(self.widget)
         context.add_widget(self.scroll)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
@@ -121,8 +134,11 @@ class OperatorPlugin(Plugin):
         self.ros_subscribers.append(rospy.Subscriber("/fleet/energy_return_advisory",String,lambda msg:self.ros_ui_bridge.energy_return_received.emit(msg),queue_size=1))
         self.ros_subscribers.append(rospy.Subscriber("/fleet/operator_snapshot",String,lambda msg:self.ros_ui_bridge.telemetry_received.emit(msg),queue_size=1))
         self.telemetry_last_rx=None;self.telemetry_stale_reported=False
+        self.energy_last_rx=None;self.energy_stale_reported=False
         self.telemetry_timer=QTimer(self.widget);self.telemetry_timer.setInterval(1000)
         self.telemetry_timer.timeout.connect(self.check_operator_snapshot_age);self.telemetry_timer.start()
+        self.energy_timer=QTimer(self.widget);self.energy_timer.setInterval(500)
+        self.energy_timer.timeout.connect(self.check_energy_advisory_age);self.energy_timer.start()
         self.update_defaults()
     def update_defaults(self):
         self.clear_runtime_markers()
@@ -443,17 +459,43 @@ class OperatorPlugin(Plugin):
         except (TypeError,ValueError,KeyError):self.perception_status.setText("感知状态数据格式错误")
     def energy_return_cb(self,msg):
         try:
-            value=json.loads(msg.data);level=value.get("fleet_level","STALE")
-            names={"NORMAL":"正常","LOW":"低余量，建议返航","CRITICAL":"临界，建议备用点降落","STALE":"数据过期，建议保持"}
-            margins=[item.get("final_margin_wh") for item in value.get("vehicles",[]) if item.get("final_margin_wh") is not None]
-            text=names.get(level,level)
-            if margins:text+=" | 最低最终余量 {:.1f} Wh".format(min(margins))
-            if value.get("slot_assignments"):text+=" | 槽位 {}".format(value["slot_assignments"])
-            if value.get("alternate_landing"):text+=" | 备用点 {}".format(value["alternate_landing"].get("world_point"))
-            if value.get("safety_override_required"):text+=" | 安全联锁优先"
-            text+=" | 影子模式";self.energy_return.setText(text)
-            self.energy_return.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","LOW":"#ef6c00","NORMAL":"#2e7d32"}.get(level,"#607d8b")))
-        except (TypeError,ValueError):self.energy_return.setText("能量返航数据格式错误")
+            advisory=validate_energy_advisory(json.loads(msg.data))
+        except (TypeError,ValueError):
+            self.energy_last_rx=None;self.energy_stale_reported=True
+            self.energy_return.setText("能量返航数据格式错误，建议保持")
+            self.energy_summary.setText("建议无效，旧数据已隐藏")
+            self.energy_table.setRowCount(0);return
+        self.energy_last_rx=time.monotonic();self.energy_stale_reported=False
+        level=advisory['level'];rows=advisory['rows']
+        names={"NORMAL":"正常","LOW":"低余量，建议返航","CRITICAL":"临界，建议备用点降落","STALE":"数据过期，建议保持"}
+        text=names[level]+" | 影子模式（不下发控制）"
+        if rows:text+=" | 最低预计落地余量 {:.1f} Wh".format(min(row['final_margin_wh'] for row in rows))
+        self.energy_return.setText(text)
+        self.energy_return.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","LOW":"#ef6c00","NORMAL":"#2e7d32"}.get(level,"#607d8b")))
+        if level=='STALE':
+            self.energy_summary.setText("能量输入过期，返航建议不可用")
+            self.energy_table.setRowCount(0);return
+        self.energy_summary.setText("{} 架建议 · 能量数据年龄 {:.1f} s · 槽位和次序仅供参考".format(len(rows),advisory['age_s']))
+        self.energy_table.setRowCount(len(rows))
+        level_colors={"NORMAL":"#66bb6a","LOW":"#ffb74d","CRITICAL":"#ef5350"}
+        for index,row in enumerate(rows):
+            values=[row['vehicle_id'],{"NORMAL":"正常","LOW":"低余量","CRITICAL":"临界"}[row['level']],
+                    "{:.1f} Wh".format(row['final_margin_wh']),
+                    str(row['slot']) if row['slot'] is not None else "未分配",
+                    "第 {} 位".format(row['landing_rank'])]
+            for column,value in enumerate(values):
+                cell=QTableWidgetItem(value)
+                if column==1:cell.setForeground(QColor(level_colors[row['level']]))
+                if column==2:cell.setToolTip("预计返航所需 {:.1f} Wh；落地余量为模型预测".format(row['required_to_land_wh']))
+                self.energy_table.setItem(index,column,cell)
+    def check_energy_advisory_age(self):
+        if (self.energy_last_rx is not None and
+                time.monotonic()-self.energy_last_rx>2.5 and
+                not self.energy_stale_reported):
+            self.energy_stale_reported=True
+            self.energy_return.setText("能量返航建议已中断，建议保持")
+            self.energy_summary.setText("返航建议中断，旧数据已隐藏")
+            self.energy_table.setRowCount(0)
     def operator_snapshot_cb(self,msg):
         try:vehicles=validate_snapshot(json.loads(msg.data))
         except (TypeError,ValueError):
@@ -489,7 +531,7 @@ class OperatorPlugin(Plugin):
             self.vehicle_summary.setText("车辆遥测汇总已中断，旧数据已隐藏")
             self.vehicle_table.setRowCount(0)
     def shutdown_plugin(self):
-        self.analysis_timer.stop();self.analysis_timeout.stop();self.telemetry_timer.stop()
+        self.analysis_timer.stop();self.analysis_timeout.stop();self.telemetry_timer.stop();self.energy_timer.stop()
         for subscriber in self.ros_subscribers:subscriber.unregister()
         if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)
         self.stop_simulation()
