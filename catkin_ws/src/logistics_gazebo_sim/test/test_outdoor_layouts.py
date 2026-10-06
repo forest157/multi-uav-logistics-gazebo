@@ -35,12 +35,16 @@ class OutdoorLayoutTest(unittest.TestCase):
                 original = render_outdoor_variant(name)
                 path.write_text(original, encoding='utf-8')
                 metadata = metadata_for_world(name, path)
-                self.assertEqual(metadata['maximum_supported_uavs'], 3)
+                self.assertEqual(metadata['maximum_supported_uavs'], len(layout['pads']))
                 self.assertEqual(metadata['sdf_model_count'],
                                  len(ET.fromstring(original).findall('world/model')))
                 self.assertEqual(len(metadata['no_fly_volumes']), len(layout['blocks']))
-                self.assertGreater(metadata['recommended_cruise_altitude_m'],
-                                   metadata['maximum_building_height_m'])
+                if name != 'outdoor_scale_yard':
+                    self.assertGreater(metadata['recommended_cruise_altitude_m'],
+                                       metadata['maximum_building_height_m'])
+                else:
+                    self.assertLess(metadata['recommended_cruise_altitude_m'],
+                                    metadata['maximum_building_height_m'])
                 self.assertEqual(metadata['dynamic_obstacle_routes'], [])
                 changed = original.replace('<size>24 22 10</size>',
                                            '<size>24 22 11</size>', 1)
@@ -50,6 +54,9 @@ class OutdoorLayoutTest(unittest.TestCase):
                 if changed == original:
                     changed = original.replace('<size>30 28 14</size>',
                                                '<size>30 28 15</size>', 1)
+                if changed == original:
+                    changed = original.replace('<size>28 120 22</size>',
+                                               '<size>28 120 23</size>', 1)
                 path.write_text(changed, encoding='utf-8')
                 with self.assertRaises(ValueError):
                     metadata_for_world(name, path)

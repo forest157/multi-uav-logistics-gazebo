@@ -87,6 +87,23 @@ class OutdoorWorldProfileTest(unittest.TestCase):
                                     0.1, 0.1, 0.1, sample_step_m=2)
         self.assertEqual(report['error_code'], 'E_STATIC_CLEARANCE')
 
+    def test_scale_yard_requires_groups_at_corridor_altitude(self):
+        world_dir = Path(__file__).resolve().parents[1] / 'worlds'
+        profile = load_outdoor_profile('outdoor_scale_yard', str(world_dir))
+        self.assertEqual(len(profile['spawn_positions_m']), 8)
+        self.assertEqual(profile['recommended_cruise_altitude_m'], 18.0)
+        # The eight-pad row cannot translate intact through the 12 m gap.
+        for x in (-42, -30, -18, -6, 6, 18, 30, 42):
+            result = check_cruise_route(profile, [[x, 0, 18]], 1.2, 0.6, 0.6)
+            if abs(x) in (6, 18, 30):
+                self.assertEqual(result['error_code'], 'E_STATIC_CLEARANCE')
+            else:
+                self.assertTrue(result['feasible'])
+        # A compact three-UAV subgroup has a clear physical corridor.
+        for x in (-3.6, 0, 3.6):
+            self.assertTrue(check_cruise_route(
+                profile, [[x, -55, 18], [x, 55, 18]], 1.2, 0.6, 0.6)['feasible'])
+
 
 if __name__ == '__main__':
     unittest.main()

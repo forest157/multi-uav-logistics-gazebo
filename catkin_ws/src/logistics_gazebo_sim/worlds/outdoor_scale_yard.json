@@ -1,0 +1,211 @@
+{
+  "extent_m": [
+    300,
+    260
+  ],
+  "road_width_m": 10,
+  "blocks": [
+    [
+      -20,
+      0,
+      28,
+      120,
+      22
+    ],
+    [
+      20,
+      0,
+      28,
+      120,
+      22
+    ]
+  ],
+  "roads": [
+    [
+      0,
+      0,
+      10,
+      230
+    ],
+    [
+      0,
+      -82,
+      120,
+      10
+    ],
+    [
+      0,
+      82,
+      120,
+      10
+    ]
+  ],
+  "pads": [
+    [
+      -42,
+      -110
+    ],
+    [
+      -30,
+      -110
+    ],
+    [
+      -18,
+      -110
+    ],
+    [
+      -6,
+      -110
+    ],
+    [
+      6,
+      -110
+    ],
+    [
+      18,
+      -110
+    ],
+    [
+      30,
+      -110
+    ],
+    [
+      42,
+      -110
+    ]
+  ],
+  "goal": [
+    0,
+    110
+  ],
+  "recommended_cruise_altitude_m": 18.0,
+  "description": "Eight-pad outdoor scale yard with a narrow physical corridor",
+  "world": "outdoor_scale_yard.world",
+  "coordinate_system": "ENU",
+  "unit": "metre",
+  "spawn_center_m": [
+    0.0,
+    -110.0
+  ],
+  "spawn_spacing_m": 12,
+  "spawn_positions_m": [
+    [
+      -42,
+      -110
+    ],
+    [
+      -30,
+      -110
+    ],
+    [
+      -18,
+      -110
+    ],
+    [
+      -6,
+      -110
+    ],
+    [
+      6,
+      -110
+    ],
+    [
+      18,
+      -110
+    ],
+    [
+      30,
+      -110
+    ],
+    [
+      42,
+      -110
+    ]
+  ],
+  "goal_center_m": [
+    0,
+    110
+  ],
+  "arrival_positions_m": [
+    [
+      -42.0,
+      110
+    ],
+    [
+      -30.0,
+      110
+    ],
+    [
+      -18.0,
+      110
+    ],
+    [
+      -6.0,
+      110
+    ],
+    [
+      6.0,
+      110
+    ],
+    [
+      18.0,
+      110
+    ],
+    [
+      30.0,
+      110
+    ],
+    [
+      42.0,
+      110
+    ]
+  ],
+  "layout_extent_m": [
+    300,
+    260
+  ],
+  "clearance_m": 3.5,
+  "status": "ground_layout_passed",
+  "limitation": "No route, flight-controller or in-flight clearance approval",
+  "schema_version": 1,
+  "world_sha256": "6f500b73809c5bd2c4c0cd94c400a1c4f9878d6e0309d652bbf2d86bd79c3fd2",
+  "world_bytes": 5753,
+  "sdf_model_count": 14,
+  "external_include_uris": [
+    "model://sun",
+    "model://ground_plane"
+  ],
+  "world_collision_count": 2,
+  "asset_origin": "project_generated",
+  "maximum_building_height_m": 22,
+  "maximum_supported_uavs": 8,
+  "no_fly_volumes": [
+    {
+      "center_xy_m": [
+        -20,
+        0
+      ],
+      "size_xy_m": [
+        28,
+        120
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 22
+    },
+    {
+      "center_xy_m": [
+        20,
+        0
+      ],
+      "size_xy_m": [
+        28,
+        120
+      ],
+      "floor_m": 0.0,
+      "ceiling_m": 22
+    }
+  ],
+  "dynamic_obstacle_routes": [],
+  "dynamic_obstacles_enabled": false,
+  "mission_integration": "pending_planner_and_flight_validation"
+}

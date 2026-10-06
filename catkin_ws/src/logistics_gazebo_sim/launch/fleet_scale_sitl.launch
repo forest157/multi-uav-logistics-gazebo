@@ -1,0 +1,60 @@
+<launch>
+  <!-- Dedicated scale yard: lightweight iris SITL only, no automatic arming. -->
+  <arg name="vehicle_count" default="1"/>
+  <arg name="vehicle_count_guard" value="$(eval 'ok' if int(arg('vehicle_count')) in (1, 3, 5, 8) else int('scale SITL supports counts 1, 3, 5 or 8'))"/>
+  <arg name="world_name" default="$(find logistics_gazebo_sim)/worlds/outdoor_scale_yard.world"/>
+  <arg name="gui" default="false"/>
+  <arg name="gazebo_master_uri" default="http://127.0.0.1:11490"/>
+  <arg name="spawn_x" default="-42.0"/>
+  <arg name="spawn_y" default="-110.0"/>
+  <arg name="spawn_spacing_m" default="12.0"/>
+  <arg name="target_z" default="18.0"/>
+  <arg name="px4_root" default="$(env HOME)/PX4_Firmware"/>
+  <env name="GAZEBO_MASTER_URI" value="$(arg gazebo_master_uri)"/>
+  <env name="GAZEBO_PLUGIN_PATH" value="$(arg px4_root)/build/px4_sitl_default/build_gazebo:$(optenv GAZEBO_PLUGIN_PATH)"/>
+  <env name="LD_LIBRARY_PATH" value="$(arg px4_root)/build/px4_sitl_default/build_gazebo:$(optenv LD_LIBRARY_PATH)"/>
+  <env name="GAZEBO_MODEL_PATH" value="$(arg px4_root)/Tools/sitl_gazebo/models:$(optenv GAZEBO_MODEL_PATH)"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="false"/>
+  </include>
+
+  <include if="$(eval int(arg('vehicle_count')) &gt; 0)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="0"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(arg spawn_x)"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 1)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="1"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 2)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="2"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + 2 * float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 3)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="3"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + 3 * float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 4)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="4"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + 4 * float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 5)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="5"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + 5 * float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 6)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="6"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + 6 * float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <include if="$(eval int(arg('vehicle_count')) &gt; 7)" file="$(find logistics_gazebo_sim)/launch/sitl_instance.launch">
+    <arg name="instance_id" value="7"/><arg name="sensor_model" value="iris"/>
+    <arg name="x" value="$(eval float(arg('spawn_x')) + 7 * float(arg('spawn_spacing_m')))"/><arg name="y" value="$(arg spawn_y)"/><arg name="target_z" value="$(arg target_z)"/>
+  </include>
+  <node pkg="logistics_gazebo_sim" type="scale_group_controller" name="scale_group_controller" output="screen">
+    <param name="vehicle_count" value="$(arg vehicle_count)" type="int"/>
+    <param name="world_dir" value="$(find logistics_gazebo_sim)/worlds"/>
+  </node>
+</launch>

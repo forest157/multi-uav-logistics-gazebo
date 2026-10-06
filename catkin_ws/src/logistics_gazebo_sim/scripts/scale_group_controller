@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Manually started, telemetry-gated scale-yard group passage controller."""
+
+import json
+import math
+import time
+
+import rospy
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import ParamValue, State
+from mavros_msgs.srv import ParamGet, ParamSet
+from std_msgs.msg import Bool
+from std_srvs.srv import Trigger, TriggerResponse
+
+from logistics_gazebo_sim.outdoor_world_profile import (check_cruise_route,
+                                                        load_outdoor_profile)
+from logistics_gazebo_sim.scale_flight import (MIN_SEPARATION, phase_plan)
+
+
+class GroupController:
+    def __init__(self):
+        self.count = rospy.get_param('~vehicle_count')
+        self.profile = load_outdoor_profile('outdoor_scale_yard',
+            rospy.get_param('~world_dir'))
+        self.plan = phase_plan(self.count, self.profile)
+        self.starts = self.profile['spawn_positions_m'][:self.count]
+        self.positions = [None] * self.count
+        self.seen = [0.0] * self.count
+        self.states = [None] * self.count
+        self.targets = [[float(x), float(y), 0.0] for x, y in self.starts]
+        self.publishers = []
+        self.param_get = []
+        self.param_set = []
+        self.status = 'ready'
+        self.fault = None
+        self.phase_index = 0
+        self.phase_since = None
+        self.stable_since = None
+        self.last_tick = time.monotonic()
+        self.min_measured_sep = float('inf')
+        self.auth = rospy.Publisher('/fleet/takeoff_authorized', Bool,
+                                    queue_size=1, latch=True)
+        self.done = rospy.Publisher('/fleet/mission_complete', Bool,
+                                    queue_size=1, latch=True)
+        for index in range(self.count):
+            prefix = '/uav{}'.format(index)
+            self.publishers.append(rospy.Publisher(prefix + '/target_pose',
+                                                  PoseStamped, queue_size=1))
+            self.param_get.append(rospy.ServiceProxy(
+                prefix + '/mavros/param/get', ParamGet))
+            self.param_set.append(rospy.ServiceProxy(
+                prefix + '/mavros/param/set', ParamSet))
+            rospy.Subscriber(prefix + '/mavros/local_position/pose', PoseStamped,
+                             self._pose, callback_args=index, queue_size=1)
+            rospy.Subscriber(prefix + '/mavros/state', State,
+                             self._state, callback_args=index, queue_size=1)
+        rospy.Service('~start', Trigger, self._start)
+        rospy.Service('~status', Trigger, self._status)
+        self.auth.publish(Bool(data=False))
+        self.done.publish(Bool(data=False))
+
+    def _state(self, message, index):
+        self.states[index] = message
+
+    def _pose(self, message, index):
+        p = message.pose.position
+        if not all(math.isfinite(value) for value in (p.x, p.y, p.z)):
+            return
+        self.positions[index] = [p.x + self.starts[index][0],
+                                 p.y + self.starts[index][1], p.z]
+        self.seen[index] = time.monotonic()
+
+    def _fresh(self, now):
+        return all(self.positions[i] is not None and now - self.seen[i] < 2.0
+                   for i in range(self.count))
+
+    def _start(self, _request):
+        now = time.monotonic()
+        if self.status != 'ready':
+            return TriggerResponse(success=False, message='not ready: ' + self.status)
+        if not self._fresh(now):
+            return TriggerResponse(success=False, message='missing/stale position')
+        if not all(state is not None and state.connected and not state.armed
+                   for state in self.states):
+            return TriggerResponse(success=False, message='MAVROS not ready or already armed')
+        if any(math.hypot(p[0] - start[0], p[1] - start[1]) > 3.0 or
+               abs(p[2]) > 2.0 for p, start in zip(self.positions, self.starts)):
+            return TriggerResponse(success=False, message='vehicle not at launch pad')
+        if self._hazard():
+            return TriggerResponse(success=False, message=self.fault)
+        # Fresh PX4 instances otherwise enter AUTO.RTL on RC loss in OFFBOARD.
+        # Older three-UAV EEPROMs happened to carry this bit already; never
+        # rely on persisted SITL state for scale-flight authorization.
+        for index in range(self.count):
+            try:
+                rospy.wait_for_service('/uav{}/mavros/param/get'.format(index),
+                                       timeout=3.0)
+                original = self.param_get[index](param_id='COM_RCL_EXCEPT')
+                if not original.success:
+                    raise ValueError('cannot read COM_RCL_EXCEPT')
+                wanted = original.value.integer | 4
+                written = self.param_set[index](
+                    param_id='COM_RCL_EXCEPT',
+                    value=ParamValue(integer=wanted, real=0.0))
+                confirmed = self.param_get[index](param_id='COM_RCL_EXCEPT')
+                if not written.success or not confirmed.success or not (
+                        confirmed.value.integer & 4):
+                    raise ValueError('COM_RCL_EXCEPT readback failed')
+            except (rospy.ROSException, rospy.ServiceException, ValueError) as exc:
+                return TriggerResponse(success=False,
+                    message='uav{} PX4 offboard RC-loss setup failed: {}'.format(index, exc))
+        self.status = 'running'
+        self.phase_since = now
+        self.auth.publish(Bool(data=True))
+        rospy.loginfo('Scale group mission manually started: %d vehicles, %d phases',
+                      self.count, len(self.plan['phases']))
+        return TriggerResponse(success=True, message='started')
+
+    def _status(self, _request):
+        state = {'status': self.status, 'phase': self.phase_index,
+                 'phase_count': len(self.plan['phases']), 'fault': self.fault,
+                 'min_measured_separation_m': (None if math.isinf(self.min_measured_sep)
+                                               else round(self.min_measured_sep, 3))}
+        return TriggerResponse(success=True, message=json.dumps(state, sort_keys=True))
+
+    def _hazard(self):
+        for left in range(self.count):
+            for right in range(left + 1, self.count):
+                distance = math.dist(self.positions[left], self.positions[right])
+                self.min_measured_sep = min(self.min_measured_sep, distance)
+                if distance < MIN_SEPARATION:
+                    self.fault = 'measured separation {:.2f}m: uav{} uav{}'.format(
+                        distance, left, right)
+                    return True
+        for index, point in enumerate(self.positions):
+            if abs(point[1]) <= 65.0 and point[2] < 4.0:
+                self.fault = 'unexpected low altitude in obstacle band at uav{}'.format(index)
+                return True
+            # The route envelope is defined only at cruise height. During
+            # vertical takeoff/landing pads are clear; 4 m avoids the 3 m
+            # route floor plus 0.6 m vehicle envelope and 0.25 m reserve.
+            if point[2] < 4.0:
+                continue
+            result = check_cruise_route(self.profile, [point], 1.2, 0.6, 0.6)
+            if not result['feasible']:
+                self.fault = '{} at uav{}'.format(result['error_code'], index)
+                return True
+        return False
+
+    def _publish_targets(self):
+        for index, point in enumerate(self.targets):
+            message = PoseStamped()
+            message.header.stamp = rospy.Time.now()
+            message.header.frame_id = 'map'
+            message.pose.position.x = point[0] - self.starts[index][0]
+            message.pose.position.y = point[1] - self.starts[index][1]
+            message.pose.position.z = point[2]
+            message.pose.orientation.w = 1.0
+            self.publishers[index].publish(message)
+
+    def _fault_hold(self, reason):
+        self.fault = reason
+        self.status = 'fault_hold'
+        # Stop moving targets. Do not authorize new arming or silently land in
+        # an occupied corridor; operator must inspect and recover manually.
+        self.targets = [list(point) for point in self.positions]
+        self.auth.publish(Bool(data=False))
+        rospy.logerr('Scale group mission HOLD: %s', reason)
+
+    def run(self):
+        rate = rospy.Rate(20)
+        while not rospy.is_shutdown():
+            now = time.monotonic()
+            dt = min(max(now - self.last_tick, 0.0), 0.1)
+            self.last_tick = now
+            if self.status == 'running':
+                if not self._fresh(now):
+                    self._fault_hold('position telemetry stale')
+                elif any(state is None or not state.connected for state in self.states):
+                    self._fault_hold('MAVROS disconnected')
+                elif self.phase_index > 0 and any(
+                        not state.armed or state.mode != 'OFFBOARD'
+                        for state in self.states):
+                    self._fault_hold('vehicle left armed OFFBOARD state')
+                elif self._hazard():
+                    self._fault_hold(self.fault)
+                elif now - self.phase_since > 600.0:
+                    self._fault_hold('phase timeout: ' +
+                                     self.plan['phases'][self.phase_index]['name'])
+                else:
+                    phase = self.plan['phases'][self.phase_index]
+                    for index in phase['vehicles']:
+                        destination = phase['targets'][index]
+                        current = self.targets[index]
+                        delta = [destination[axis] - current[axis] for axis in range(3)]
+                        length = math.sqrt(sum(component * component for component in delta))
+                        fraction = min(1.0, 2.0 * dt / length) if length > 0 else 1.0
+                        self.targets[index] = [current[axis] + fraction * delta[axis]
+                                               for axis in range(3)]
+                    arrived = all(math.dist(self.positions[index],
+                                            phase['targets'][index]) < 1.0
+                                  for index in phase['vehicles'])
+                    if arrived:
+                        if self.stable_since is None:
+                            self.stable_since = now
+                        elif now - self.stable_since >= 2.0:
+                            rospy.loginfo('Scale phase %d/%d complete: %s',
+                                          self.phase_index + 1,
+                                          len(self.plan['phases']), phase['name'])
+                            self.phase_index += 1
+                            self.phase_since = now
+                            self.stable_since = None
+                            if self.phase_index == len(self.plan['phases']):
+                                self.status = 'landing'
+                                self.done.publish(Bool(data=True))
+                                rospy.loginfo('Scale groups returned; requesting landing')
+                    else:
+                        self.stable_since = None
+            elif self.status == 'landing':
+                if all(state is not None and not state.armed for state in self.states):
+                    self.status = 'complete'
+                    rospy.loginfo('Scale group mission complete; all vehicles disarmed')
+            self._publish_targets()
+            rate.sleep()
+
+
+if __name__ == '__main__':
+    rospy.init_node('scale_group_controller')
+    GroupController().run()

@@ -1,6 +1,6 @@
 # Multi-UAV Logistics Gazebo Simulation
 
-三机物流配送 Gazebo/PX4/ROS 仿真工程。本仓库按容器内原始目录布局保存，便于完整恢复。
+多机物流配送 Gazebo/PX4/ROS 仿真工程。本仓库按容器内原始目录布局保存，便于完整恢复。
 
 ## 目录
 
@@ -18,7 +18,7 @@
 
 ## 当前版本
 
-当前稳定基线为 `v0.5.12`，`main` 使用统一单一 ROS 包。园区、住宅和街区三个真实尺度自建室外世界均完成三机物理雷达投递返航验收，并通过[系列总验收](reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md)；ORCA 仅在安全门约束下受限接管，分布式 MPC 仍保持影子模式。导入的 Baylands 世界仅完成资产、许可证、碰撞体及空载加载核验，**尚未接入三机自动飞行**。
+当前版本为 `v0.6.0`，`main` 使用统一单一 ROS 包。[0.6.0 发布说明](reference/gazebo_3d_ros_package_experiment/v060_launch_preflight/RELEASE.md)记录 1/3/5/8 架 PX4 SITL 分组穿越、往返与独立 Gazebo 真值验收；规模模式采用轻量 iris，**不等于八机雷达避障**。园区、住宅和街区三个真实尺度自建室外世界仍保留三机物理雷达投递返航能力；ORCA 仅在安全门约束下受限接管，分布式 MPC 保持影子模式。导入的 Baylands 世界仅完成资产、许可证、碰撞体及空载加载核验，**尚未接入三机自动飞行**。
 
 ## 仿真画面
 
@@ -58,7 +58,7 @@ source /home/devuser/catkin_ws/devel/setup.bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover -s test -q
 ```
 
-`v0.5.12` 发布前通过 252 项 Python 回归测试、四包 catkin 构建和 22/22 项系列技术门。完整 Gazebo 飞行和保守真值净空审计见[系列总验收](reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md)；单元测试不能代替飞行验收。
+`v0.6.0` 通过 273 项 Python 回归测试、七包 catkin 构建和 1/3/5/8 架分级实飞；详细净空与阶段覆盖见[0.6.0 发布说明](reference/gazebo_3d_ros_package_experiment/v060_launch_preflight/RELEASE.md)。既有 0.5 系列 22/22 项总验收见[系列报告](reference/gazebo_3d_ros_package_experiment/v0512_series_acceptance/RELEASE.md)；单元测试不能代替飞行验收。
 
 ## 恢复历史版本
 

@@ -71,9 +71,13 @@ class SitlPreflightTest(unittest.TestCase):
         group = instance.find('group')
         self.assertEqual(group.get('ns'), "$(eval 'uav' + str(int(arg('instance_id'))))")
         includes = list(group.findall('include'))
-        self.assertEqual(len(includes), 2)
+        self.assertEqual(len(includes), 3)
+        self.assertEqual(includes[0].get('if'),
+                         "$(eval arg('sensor_model') == 'lidar')")
+        self.assertEqual(includes[1].get('if'),
+                         "$(eval arg('sensor_model') == 'iris')")
         spawn = {arg.get('name'): arg.get('value') for arg in includes[0].findall('arg')}
-        mavros = {arg.get('name'): arg.get('value') for arg in includes[1].findall('arg')}
+        mavros = {arg.get('name'): arg.get('value') for arg in includes[2].findall('arg')}
         self.assertEqual(spawn['mavlink_udp_port'], "$(eval 14560 + int(arg('instance_id')))")
         self.assertEqual(spawn['mavlink_tcp_port'], "$(eval 4560 + int(arg('instance_id')))")
         self.assertEqual(mavros['fcu_url'],

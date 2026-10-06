@@ -1,0 +1,83 @@
+{
+  "version": "0.6.0",
+  "date": "2026-10-06",
+  "world": "outdoor_scale_yard",
+  "world_sha256": "6f500b73809c5bd2c4c0cd94c400a1c4f9878d6e0309d652bbf2d86bd79c3fd2",
+  "method": "audit_scale_flight from before manual start, using independent Gazebo model_states truth",
+  "limits": {
+    "minimum_vehicle_separation_m": 2.7,
+    "minimum_static_collision_envelope_clearance_m": 0.0,
+    "all_phases_observed": true,
+    "all_disarmed": true
+  },
+  "flights": [
+    {
+      "vehicles": 1,
+      "groups": [1],
+      "observed_phases": 12,
+      "gazebo_truth_frames": 96624,
+      "minimum_vehicle_separation_m": null,
+      "minimum_static_clearance_m": 4.6256032033178505,
+      "corridor_altitude_range_m": [17.717480679809377, 18.22382386544036],
+      "elapsed_wall_s": 386.6829866170001,
+      "hazards": [],
+      "all_disarmed": true,
+      "passed": true
+    },
+    {
+      "vehicles": 3,
+      "groups": [3],
+      "observed_phases": 12,
+      "gazebo_truth_frames": 97500,
+      "minimum_vehicle_separation_m": 3.182002863710294,
+      "minimum_static_clearance_m": 1.0138743162798065,
+      "corridor_altitude_range_m": [17.70888460586994, 18.264035737900258],
+      "elapsed_wall_s": 390.1491199690008,
+      "hazards": [],
+      "all_disarmed": true,
+      "passed": true
+    },
+    {
+      "vehicles": 5,
+      "groups": [3, 2],
+      "observed_phases": 22,
+      "gazebo_truth_frames": 156875,
+      "minimum_vehicle_separation_m": 2.868786881009431,
+      "minimum_static_clearance_m": 0.9840835983490763,
+      "corridor_altitude_range_m": [17.78275920393958, 18.2759513957229],
+      "elapsed_wall_s": 627.7455057140005,
+      "hazards": [],
+      "all_disarmed": true,
+      "passed": true
+    },
+    {
+      "vehicles": 8,
+      "groups": [3, 3, 2],
+      "observed_phases": 32,
+      "gazebo_truth_frames": 249001,
+      "minimum_vehicle_separation_m": 3.1015517660371508,
+      "minimum_static_clearance_m": 1.000960296317863,
+      "corridor_altitude_range_m": [17.732255336088638, 18.295023182255495],
+      "elapsed_wall_s": 996.3515375070001,
+      "hazards": [],
+      "all_disarmed": true,
+      "passed": true
+    }
+  ],
+  "initial_five_vehicle_trial": {
+    "passed": false,
+    "observation": "uav3 and uav4 remained disarmed in AUTO.RTL; first three vehicles landed on operator command",
+    "root_cause": "COM_RCL_EXCEPT was 4 on persisted uav0-2 EEPROM but 0 on new uav3-4 instances",
+    "resolution": "manual start now sets and reads back Offboard RC-loss exception bit 4 for every instance before authorization",
+    "retest": "five-vehicle full flight and eight-vehicle full flight passed"
+  },
+  "kinematic_stress": [
+    {"vehicles": 20, "groups": 7, "last_exit_s": 415.0, "passed": true},
+    {"vehicles": 35, "groups": 12, "last_exit_s": 715.0, "passed": true},
+    {"vehicles": 50, "groups": 17, "last_exit_s": 1015.0, "passed": true}
+  ],
+  "python_unittest_count": 273,
+  "catkin_packages_built": 7,
+  "catkin_build_warnings": 0,
+  "scope": "Lightweight iris SITL without lidar or dynamic obstacles; stress is kinematic only"
+}

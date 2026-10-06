@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Preflight then start lightweight scale-yard PX4 SITL; never auto-arms."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+
+import rospkg
+
+from logistics_gazebo_sim.scale_launch import preflight_scale
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--count', type=int, choices=(1, 3, 5, 8), required=True)
+    parser.add_argument('--gui', choices=('true', 'false'), default='false')
+    parser.add_argument('--gazebo-master-uri')
+    parser.add_argument('--dry-run', action='store_true')
+    args = parser.parse_args()
+    package = Path(rospkg.RosPack().get_path('logistics_gazebo_sim'))
+    report = preflight_scale(args.count, package, args.gazebo_master_uri)
+    if report['pass']:
+        px4_root = Path.home() / 'PX4_Firmware'
+        gazebo = px4_root / 'Tools/sitl_gazebo'
+        if not (px4_root / 'package.xml').is_file() or not (gazebo / 'package.xml').is_file():
+            report['errors'].append('PX4 ROS packages are missing')
+        if shutil.which('roslaunch') is None:
+            report['errors'].append('roslaunch is not on PATH')
+        report['pass'] = not report['errors']
+    if report['pass']:
+        command = ['roslaunch', 'logistics_gazebo_sim', 'fleet_scale_sitl.launch',
+                   'vehicle_count:={}'.format(args.count), 'gui:=' + args.gui,
+                   'gazebo_master_uri:=' + report['gazebo_master_uri']]
+        report['launch_command'] = command
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), flush=True)
+    if not report['pass']:
+        return 1
+    if not args.dry_run:
+        environment = dict(os.environ)
+        environment['ROS_PACKAGE_PATH'] = os.pathsep.join(
+            [str(gazebo), str(px4_root), environment.get('ROS_PACKAGE_PATH', '')])
+        os.execvpe(command[0], command, environment)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -142,6 +142,12 @@ OUTDOOR_LAYOUTS = {
         roads=[(0, y, 230, 10) for y in (-32.5, 32.5)] + [(x, 0, 10, 210) for x in (-52, 0, 52)],
         pads=[(-90, -95), (-75, -95), (-60, -95)], goal=[90, 95],
         description='Dense urban blocks with varied building heights'),
+    'outdoor_scale_yard': dict(extent_m=[300, 260], road_width_m=10,
+        blocks=[(-20, 0, 28, 120, 22), (20, 0, 28, 120, 22)],
+        roads=[(0, 0, 10, 230), (0, -82, 120, 10), (0, 82, 120, 10)],
+        pads=[(x, -110) for x in (-42, -30, -18, -6, 6, 18, 30, 42)],
+        goal=[0, 110], recommended_cruise_altitude_m=18.0,
+        description='Eight-pad outdoor scale yard with a narrow physical corridor'),
 }
 
 

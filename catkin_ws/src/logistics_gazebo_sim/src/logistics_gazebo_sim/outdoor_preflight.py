@@ -10,17 +10,20 @@ def preflight(name, clearance=3.5):
         raise ValueError('clearance must be positive and finite')
     layout = OUTDOOR_LAYOUTS[name]
     pads = layout['pads']
+    if len(pads) < 2:
+        raise ValueError('outdoor layout requires at least two spawn pads')
     center = [sum(p[a] for p in pads) / len(pads) for a in (0, 1)]
     spacing = pads[1][0] - pads[0][0]
+    middle = (len(pads) - 1) / 2.0
     if spacing <= 0 or any(abs(p[1]-center[1]) > 1e-6 or
-                            abs(p[0]-(center[0]+(i-1)*spacing)) > 1e-6
+                            abs(p[0]-(center[0]+(i-middle)*spacing)) > 1e-6
                             for i, p in enumerate(pads)):
-        raise ValueError('pads must match the three-UAV spawn row')
+        raise ValueError('pads must match the fleet spawn row')
     if spacing < 2 * clearance:
         raise ValueError('spawn spacing does not preserve clearance')
     # Arrival positions use the same row geometry as departure.
-    destinations = [[layout['goal'][0]+offset*spacing, layout['goal'][1]]
-                    for offset in (-1, 0, 1)]
+    destinations = [[layout['goal'][0]+(index-middle)*spacing, layout['goal'][1]]
+                    for index in range(len(pads))]
     for x, y in list(pads) + destinations:
         if any(abs(v)+clearance > extent/2 for v, extent in zip((x,y), layout['extent_m'])):
             raise ValueError('fleet landing footprint exceeds layout boundary')
@@ -102,7 +105,7 @@ def metadata_for_world(name, world_path):
         external_include_uris=[item.findtext('uri') for item in world.findall('include')],
         world_collision_count=len(world.findall('model/link/collision')),
         asset_origin='project_generated',
-        recommended_cruise_altitude_m=height + 3.0,
+        recommended_cruise_altitude_m=layout.get('recommended_cruise_altitude_m', height + 3.0),
         maximum_building_height_m=height,
         maximum_supported_uavs=len(layout['pads']),
         # Buildings define the only restricted air volumes in these layouts.

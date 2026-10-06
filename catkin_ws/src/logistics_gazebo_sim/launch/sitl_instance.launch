@@ -3,15 +3,28 @@
   <arg name="x"/>
   <arg name="y"/>
   <arg name="target_z"/>
+  <arg name="sensor_model" default="lidar"/>
   <arg name="instance_id_guard" value="$(eval 'ok' if 0 &lt;= int(arg('instance_id')) &lt;= 7 else int('SITL instance ID must be 0..7'))"/>
+  <arg name="sensor_model_guard" value="$(eval 'ok' if arg('sensor_model') in ('lidar', 'iris') else int('sensor_model must be lidar or iris'))"/>
 
   <group ns="$(eval 'uav' + str(int(arg('instance_id'))))">
-    <include file="$(find logistics_gazebo_sim)/launch/single_vehicle_lidar_spawn.launch">
+    <include if="$(eval arg('sensor_model') == 'lidar')" file="$(find logistics_gazebo_sim)/launch/single_vehicle_lidar_spawn.launch">
       <arg name="x" value="$(arg x)"/><arg name="y" value="$(arg y)"/><arg name="z" value="0"/>
       <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
       <arg name="vehicle" value="iris"/>
       <arg name="mavlink_udp_port" value="$(eval 14560 + int(arg('instance_id')))"/>
       <arg name="mavlink_tcp_port" value="$(eval 4560 + int(arg('instance_id')))"/>
+      <arg name="ID" value="$(arg instance_id)"/>
+    </include>
+    <include if="$(eval arg('sensor_model') == 'iris')" file="$(find px4)/launch/single_vehicle_spawn.launch">
+      <arg name="x" value="$(arg x)"/><arg name="y" value="$(arg y)"/><arg name="z" value="0"/>
+      <arg name="R" value="0"/><arg name="P" value="0"/><arg name="Y" value="0"/>
+      <arg name="vehicle" value="iris"/>
+      <arg name="mavlink_udp_port" value="$(eval 14560 + int(arg('instance_id')))"/>
+      <arg name="mavlink_tcp_port" value="$(eval 4560 + int(arg('instance_id')))"/>
+      <arg name="gst_udp_port" value="$(eval 5600 + int(arg('instance_id')))"/>
+      <arg name="video_uri" value="$(eval 5600 + int(arg('instance_id')))"/>
+      <arg name="mavlink_cam_udp_port" value="$(eval 14530 + int(arg('instance_id')))"/>
       <arg name="ID" value="$(arg instance_id)"/>
     </include>
     <include file="$(find mavros)/launch/px4.launch">
