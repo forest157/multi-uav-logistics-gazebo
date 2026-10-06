@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Bounded 2 Hz MAVROS/energy snapshot for the rqt vehicle table."""
+
+import json
+import time
+
+import rospy
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import State
+from sensor_msgs.msg import BatteryState
+from std_msgs.msg import String
+
+from logistics_gazebo_sim.fleet_operator_telemetry import FleetOperatorTelemetry
+
+
+class TelemetryNode:
+    def __init__(self):
+        self.model = FleetOperatorTelemetry(rospy.get_param('~vehicle_count', 3))
+        self.publisher = rospy.Publisher('/fleet/operator_snapshot', String,
+                                         queue_size=1, latch=True)
+        for index in range(self.model.count):
+            namespace = '/uav{}/mavros'.format(index)
+            rospy.Subscriber(namespace + '/state', State, self._state,
+                             callback_args=index, queue_size=1)
+            rospy.Subscriber(namespace + '/local_position/pose', PoseStamped,
+                             self._pose, callback_args=index, queue_size=1)
+            rospy.Subscriber(namespace + '/battery', BatteryState, self._battery,
+                             callback_args=index, queue_size=1)
+        rospy.Subscriber('/fleet/energy_state', String, self._energy, queue_size=1)
+
+    def _state(self, message, index):
+        self.model.update_state(index, bool(message.connected), bool(message.armed),
+                                message.mode, time.monotonic())
+
+    def _pose(self, message, index):
+        p = message.pose.position
+        self.model.update_pose(index, [p.x, p.y, p.z], time.monotonic())
+
+    def _battery(self, message, index):
+        self.model.update_battery(index, message.percentage, time.monotonic())
+
+    def _energy(self, message):
+        try:
+            report = json.loads(message.data)
+        except (TypeError, ValueError):
+            return
+        self.model.update_energy(report, time.monotonic())
+
+    def run(self):
+        rate = rospy.Rate(2)
+        while not rospy.is_shutdown():
+            report = self.model.snapshot(time.monotonic())
+            self.publisher.publish(String(data=json.dumps(report, separators=(',', ':'))))
+            rate.sleep()
+
+
+if __name__ == '__main__':
+    rospy.init_node('fleet_operator_telemetry')
+    TelemetryNode().run()

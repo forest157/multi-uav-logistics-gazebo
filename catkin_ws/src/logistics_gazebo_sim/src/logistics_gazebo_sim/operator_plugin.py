@@ -3,16 +3,19 @@ import os
 import shutil
 import signal
 import socket
+import time
 import rospy
 import rospkg
 from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import Point, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim.scenes import SCENES, SCALE, metric_xy
+from logistics_gazebo_sim.fleet_operator_telemetry import validate_snapshot
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
-from python_qt_binding.QtGui import QPixmap
+from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget)
+    QHeaderView, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
+    QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 from qt_gui.plugin import Plugin
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -25,7 +28,7 @@ SCENE_DEFAULTS = {
 class PointBridge(QObject):
     point_received=Signal(float,float)
 class RosUiBridge(QObject):
-    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object);perception_received=Signal(object);energy_return_received=Signal(object)
+    state_received=Signal(object);diagnostics_received=Signal(object);risk_received=Signal(object);perception_received=Signal(object);energy_return_received=Signal(object);telemetry_received=Signal(object)
 
 class OperatorPlugin(Plugin):
     def __init__(self, context):
@@ -74,7 +77,21 @@ class OperatorPlugin(Plugin):
         status=QGroupBox("\u72b6\u6001");sf=QFormLayout(status);self.state=QLabel("\u672a\u542f\u52a8");self.stage=QLabel("-");self.safety=QLabel("\u7b49\u5f85\u6570\u636e");self.dynamic_risk=QLabel("等待动态障碍数据");self.perception_status=QLabel("等待感知数据");self.energy_return=QLabel("等待能量返航数据")
         self.state.setObjectName("statusBadge");self.stage.setObjectName("statusBadge")
         self.progress=QProgressBar();self.progress.setRange(0,1000);self.progress.setValue(0);self.progress.setFormat("%p%")
-        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);sf.addRow("感知状态",self.perception_status);sf.addRow("能量返航",self.energy_return);root.addWidget(status);root.addStretch();context.add_widget(self.widget)
+        sf.addRow("任务",self.state);sf.addRow("阶段",self.stage);sf.addRow("任务进度",self.progress);sf.addRow("静态安全",self.safety);sf.addRow("动态风险",self.dynamic_risk);sf.addRow("感知状态",self.perception_status);sf.addRow("能量返航",self.energy_return);root.addWidget(status)
+        fleet_box=QGroupBox("车辆状态 · 低频汇总");fleet_layout=QVBoxLayout(fleet_box)
+        self.vehicle_summary=QLabel("等待车辆遥测汇总")
+        self.vehicle_table=QTableWidget(0,7)
+        self.vehicle_table.setHorizontalHeaderLabels(["车辆","状态","模式","高度","电量","估算剩余","遥测年龄"])
+        self.vehicle_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.vehicle_table.setSelectionMode(QTableWidget.NoSelection)
+        self.vehicle_table.setAlternatingRowColors(True)
+        self.vehicle_table.verticalHeader().setVisible(False)
+        self.vehicle_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.vehicle_table.setMinimumHeight(250)
+        fleet_layout.addWidget(self.vehicle_summary);fleet_layout.addWidget(self.vehicle_table)
+        root.addWidget(fleet_box);root.addStretch()
+        self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setWidget(self.widget)
+        context.add_widget(self.scroll)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
         self.process.setProcessChannelMode(QProcess.MergedChannels);self.process.readyReadStandardOutput.connect(self.drain_simulation_output)
         self.simulation_stop_requested=False;self.simulation_start_pending=False
@@ -91,15 +108,21 @@ class OperatorPlugin(Plugin):
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
         self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True)
         self.runtime_marker_pubs=[rospy.Publisher(topic,MarkerArray,queue_size=1,latch=True) for topic in ("/fleet/markers","/dynamic_obstacles/markers")]
-        rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1)
+        self.ros_subscribers=[]
+        self.ros_subscribers.append(rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1))
         for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
         self.formation.currentIndexChanged.connect(self.parameters_changed)
         self.perception_source.setToolTip("停止仿真后选择，下一次启动生效；仅切换数据源不会重新生成航线。")
-        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb);self.ros_ui_bridge.energy_return_received.connect(self.energy_return_cb)
-        rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1);rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1)
-        rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1)
-        rospy.Subscriber("/perception/status",String,lambda msg:self.ros_ui_bridge.perception_received.emit(msg),queue_size=1)
-        rospy.Subscriber("/fleet/energy_return_advisory",String,lambda msg:self.ros_ui_bridge.energy_return_received.emit(msg),queue_size=1)
+        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb);self.ros_ui_bridge.energy_return_received.connect(self.energy_return_cb);self.ros_ui_bridge.telemetry_received.connect(self.operator_snapshot_cb)
+        self.ros_subscribers.append(rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1))
+        self.ros_subscribers.append(rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1))
+        self.ros_subscribers.append(rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1))
+        self.ros_subscribers.append(rospy.Subscriber("/perception/status",String,lambda msg:self.ros_ui_bridge.perception_received.emit(msg),queue_size=1))
+        self.ros_subscribers.append(rospy.Subscriber("/fleet/energy_return_advisory",String,lambda msg:self.ros_ui_bridge.energy_return_received.emit(msg),queue_size=1))
+        self.ros_subscribers.append(rospy.Subscriber("/fleet/operator_snapshot",String,lambda msg:self.ros_ui_bridge.telemetry_received.emit(msg),queue_size=1))
+        self.telemetry_last_rx=None;self.telemetry_stale_reported=False
+        self.telemetry_timer=QTimer(self.widget);self.telemetry_timer.setInterval(1000)
+        self.telemetry_timer.timeout.connect(self.check_operator_snapshot_age);self.telemetry_timer.start()
         self.update_defaults()
     def update_defaults(self):
         self.clear_runtime_markers()
@@ -431,7 +454,42 @@ class OperatorPlugin(Plugin):
             text+=" | 影子模式";self.energy_return.setText(text)
             self.energy_return.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","LOW":"#ef6c00","NORMAL":"#2e7d32"}.get(level,"#607d8b")))
         except (TypeError,ValueError):self.energy_return.setText("能量返航数据格式错误")
+    def operator_snapshot_cb(self,msg):
+        try:vehicles=validate_snapshot(json.loads(msg.data))
+        except (TypeError,ValueError):
+            self.vehicle_summary.setText("车辆遥测格式错误");self.vehicle_table.setRowCount(0);return
+        self.telemetry_last_rx=time.monotonic();self.telemetry_stale_reported=False
+        active=sum(item["status"]=="ARMED" for item in vehicles)
+        stale=sum(item["status"]=="STALE" for item in vehicles)
+        self.vehicle_summary.setText("{} 架在线快照 · {} 架已解锁 · {} 架遥测过期".format(len(vehicles),active,stale))
+        self.vehicle_table.setRowCount(len(vehicles))
+        names={"ARMED":"飞行中","READY":"就绪","DISCONNECTED":"断连","STALE":"过期"}
+        colors={"ARMED":"#66bb6a","READY":"#64b5f6","DISCONNECTED":"#ef5350","STALE":"#ffb74d"}
+        for row,item in enumerate(vehicles):
+            position=item.get("position_local_m")
+            fraction=item.get("battery_fraction")
+            energy=item.get("remaining_wh")
+            age=item.get("state_age_s")
+            values=[item["vehicle_id"],names[item["status"]],item.get("mode") or "-",
+                    "{:.1f} m".format(position[2]) if position is not None else "-",
+                    "{:.0f}% ({})".format(100*fraction,item.get("battery_source") or "-") if fraction is not None else "-",
+                    "{:.1f} Wh".format(energy) if isinstance(energy,(int,float)) else "-",
+                    "{:.1f} s".format(age) if isinstance(age,(int,float)) else "-"]
+            for column,value in enumerate(values):
+                cell=QTableWidgetItem(value)
+                if column==1:cell.setForeground(QColor(colors[item["status"]]))
+                if column==3 and position is not None:
+                    cell.setToolTip("局部位置 x={:.1f}, y={:.1f}, z={:.1f} m".format(*position))
+                self.vehicle_table.setItem(row,column,cell)
+    def check_operator_snapshot_age(self):
+        if (self.telemetry_last_rx is not None and
+                time.monotonic()-self.telemetry_last_rx>3.0 and
+                not self.telemetry_stale_reported):
+            self.telemetry_stale_reported=True
+            self.vehicle_summary.setText("车辆遥测汇总已中断，旧数据已隐藏")
+            self.vehicle_table.setRowCount(0)
     def shutdown_plugin(self):
-        self.analysis_timer.stop();self.analysis_timeout.stop()
+        self.analysis_timer.stop();self.analysis_timeout.stop();self.telemetry_timer.stop()
+        for subscriber in self.ros_subscribers:subscriber.unregister()
         if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)
         self.stop_simulation()

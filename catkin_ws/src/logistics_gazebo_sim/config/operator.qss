@@ -20,3 +20,6 @@ QPushButton#secondary { background: #394454; color: #d5deea; }
 QProgressBar { background: #0c1219; border: 1px solid #34475e; border-radius: 7px; height: 18px; text-align: center; color: white; font-weight: 600; }
 QProgressBar::chunk { border-radius: 6px; background: #2d9cdb; }
 QMessageBox { background: #151d28; }
+QScrollArea { border: none; background: #10151d; }
+QTableWidget { background: #101923; alternate-background-color: #172332; border: 1px solid #34475e; gridline-color: #2b3d50; color: #e7edf5; }
+QHeaderView::section { background: #223349; color: #b8d8f3; border: 1px solid #34475e; padding: 5px; }
