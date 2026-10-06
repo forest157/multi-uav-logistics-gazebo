@@ -103,6 +103,16 @@ class OperatorPlugin(Plugin):
         self.risk_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.risk_table.setMinimumHeight(230)
         risk_layout.addWidget(self.risk_summary);risk_layout.addWidget(self.risk_table)
+        self.prediction_summary=QLabel("等待障碍物轨迹预测")
+        self.prediction_table=QTableWidget(0,4)
+        self.prediction_table.setHorizontalHeaderLabels(["障碍物","当前估计","预测中点","预测终点"])
+        self.prediction_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.prediction_table.setSelectionMode(QTableWidget.NoSelection)
+        self.prediction_table.setAlternatingRowColors(True)
+        self.prediction_table.verticalHeader().setVisible(False)
+        self.prediction_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.prediction_table.setMinimumHeight(190)
+        risk_layout.addWidget(self.prediction_summary);risk_layout.addWidget(self.prediction_table)
         root.addWidget(risk_box)
         energy_box=QGroupBox("返航能量建议 · 只读影子模式");energy_layout=QVBoxLayout(energy_box)
         self.energy_summary=QLabel("等待能量返航建议")
@@ -450,7 +460,8 @@ class OperatorPlugin(Plugin):
             self.risk_last_rx=None;self.risk_stale_reported=True
             self.dynamic_risk.setText("动态风险数据无效，状态未知")
             self.risk_summary.setText("风险报告无效，旧预测已隐藏")
-            self.risk_table.setRowCount(0);return
+            self.prediction_summary.setText("轨迹报告无效，旧预测已隐藏")
+            self.risk_table.setRowCount(0);self.prediction_table.setRowCount(0);return
         self.risk_last_rx=time.monotonic();self.risk_stale_reported=False
         level=report['level'];rows=report['rows']
         level_names={"SAFE":"安全","WARNING":"警告","CRITICAL":"严重","STALE":"数据过期"}
@@ -465,7 +476,8 @@ class OperatorPlugin(Plugin):
         self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
         if level=='STALE':
             self.risk_summary.setText("动态障碍或机体状态过期，冲突预测不可用")
-            self.risk_table.setRowCount(0);return
+            self.prediction_summary.setText("动态数据过期，轨迹预测不可用")
+            self.risk_table.setRowCount(0);self.prediction_table.setRowCount(0);return
         pair=report['closest_pair'];separation=report['minimum_separation_m']
         summary="{} 架预测 · {} 个动态障碍".format(len(rows),report['obstacle_count'])
         if pair is not None and separation is not None:
@@ -488,6 +500,31 @@ class OperatorPlugin(Plugin):
                 if column==5 and row['closest_time_s'] is not None:
                     cell.setToolTip("预测 {:.1f} s 后的最近点；不是实测位置".format(row['closest_time_s']))
                 self.risk_table.setItem(index,column,cell)
+        tracks=report['prediction_tracks']
+        if tracks is None:
+            self.prediction_summary.setText("未检测到动态障碍，无需轨迹外推" if report['obstacle_count']==0
+                                            else "风险报告未提供障碍物轨迹")
+            self.prediction_table.setRowCount(0)
+        else:
+            self.prediction_summary.setText("世界坐标 · 恒速外推 {} 条轨迹{}；不是实测未来位置".format(
+                len(tracks),"，另有 {} 条未显示".format(report['prediction_truncated'])
+                if report['prediction_truncated'] else ""))
+            self.prediction_table.setRowCount(len(tracks))
+            if tracks:
+                sample_times=[tracks[0]['samples'][index][0] for index in (1,2)]
+                self.prediction_table.setHorizontalHeaderLabels(
+                    ["障碍物","当前估计","+{:.1f} s".format(sample_times[0]),
+                     "+{:.1f} s".format(sample_times[1])])
+            for index,track in enumerate(tracks):
+                values=[track['id']+("（遮挡估计）" if not track['observed'] else "")]
+                values.extend("({:.1f}, {:.1f}, {:.1f})".format(*sample[1:])
+                              for sample in track['samples'])
+                for column,value in enumerate(values):
+                    cell=QTableWidgetItem(value)
+                    if column==0 and not track['observed']:
+                        cell.setForeground(QColor("#ffb74d"))
+                        cell.setToolTip("目标当前被遮挡，位置和轨迹均为记忆外推")
+                    self.prediction_table.setItem(index,column,cell)
     def check_dynamic_risk_age(self):
         if (self.risk_last_rx is not None and
                 time.monotonic()-self.risk_last_rx>1.5 and
@@ -495,7 +532,8 @@ class OperatorPlugin(Plugin):
             self.risk_stale_reported=True
             self.dynamic_risk.setText("动态风险报告中断，状态未知")
             self.risk_summary.setText("风险报告中断，旧预测已隐藏")
-            self.risk_table.setRowCount(0)
+            self.prediction_summary.setText("风险报告中断，旧轨迹已隐藏")
+            self.risk_table.setRowCount(0);self.prediction_table.setRowCount(0)
     def perception_status_cb(self,msg):
         try:
             value=json.loads(msg.data);state=value.get("state","UNKNOWN")

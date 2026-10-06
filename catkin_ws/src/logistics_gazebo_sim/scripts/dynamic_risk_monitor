@@ -9,6 +9,7 @@ from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header, String
 
 from logistics_gazebo_sim.dynamic_obstacles import ObstacleMemory, RiskLevelHysteresis, assess_fleet_separation, assess_timed_path, obstacle_feed_state, prediction_path
+from logistics_gazebo_sim.risk_prediction_summary import summarize_predictions
 
 
 class DynamicRiskMonitor:
@@ -206,7 +207,8 @@ class DynamicRiskMonitor:
 
     def report(self):
         now=rospy.Time.now();last=None if self.last_obstacle_stamp is None else self.last_obstacle_stamp.to_sec()
-        if obstacle_feed_state(last,now.to_sec(),1.0)=="STALE":
+        if (obstacle_feed_state(last,now.to_sec(),1.0)=="STALE" or
+                obstacle_feed_state(self.obstacle_source_stamp,now.to_sec(),1.0)=="STALE"):
             self.obstacles=[]
             return {"level":"STALE","message":"等待动态障碍数据","vehicle_reports":[],"obstacle_count":0}
         if not self.obstacles and not self.orca_recovery_active:
@@ -241,6 +243,9 @@ class DynamicRiskMonitor:
         nearest = min(reports, key=lambda value:
                       float("inf") if value["minimum_clearance_m"] is None
                       else value["minimum_clearance_m"])
+        predictions=summarize_predictions(
+            self.obstacles,self.horizon,
+            [value["obstacle_id"] for value in reports if value["obstacle_id"] is not None])
         return {"level": level, "message": "动态障碍风险{}".format(level),
                 "vehicle_reports": reports, "obstacle_count": len(self.obstacles),
                 "nearest_vehicle": nearest["vehicle_id"],
@@ -250,6 +255,7 @@ class DynamicRiskMonitor:
                 "execution_context":self.execution_context(),
                 "fleet_separation":separation,
                 "local_avoidance_algorithm":self.local_avoidance_algorithm,
+                "prediction_summary":predictions,
                 "avoidance":avoidance}
 
     def publish(self, report):

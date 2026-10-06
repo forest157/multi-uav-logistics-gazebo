@@ -3,6 +3,7 @@ import math
 import unittest
 
 from logistics_gazebo_sim.operator_risk_view import validate_risk_report
+from logistics_gazebo_sim.risk_prediction_summary import summarize_predictions
 
 
 def report():
@@ -37,6 +38,25 @@ class OperatorRiskViewTest(unittest.TestCase):
             'level': 'STALE', 'obstacle_count': 0, 'vehicle_reports': []})['rows'], [])
         self.assertEqual(validate_risk_report({
             'level': 'SAFE', 'obstacle_count': 0, 'vehicle_reports': []})['rows'], [])
+
+    def test_constant_velocity_tracks_are_validated_with_scope(self):
+        value = report()
+        value['prediction_summary'] = summarize_predictions([{
+            'id': 'crossing_1', 'position': [1, 2, 8],
+            'velocity': [1, 0, 0], 'observed': False}], 8.0)
+        result = validate_risk_report(value)
+        self.assertEqual(result['prediction_tracks'][0]['samples'][-1],
+                         [8.0, 9.0, 2.0, 8.0])
+        self.assertFalse(result['prediction_tracks'][0]['observed'])
+        for mutation in (
+                lambda data: data['prediction_summary'].update(frame='body'),
+                lambda data: data['prediction_summary']['tracks'][0]['samples'][2].__setitem__(1, math.nan),
+                lambda data: data['prediction_summary'].update(truncated_tracks=1),
+                lambda data: data['prediction_summary']['tracks'][0]['samples'][1].__setitem__(0, 0.0)):
+            bad = copy.deepcopy(value)
+            mutation(bad)
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                validate_risk_report(bad)
 
     def test_rejects_malformed_or_unbounded_prediction(self):
         for mutation in (

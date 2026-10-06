@@ -84,6 +84,49 @@ def validate_risk_report(report):
             raise ValueError('invalid closest vehicle pair')
         separation_m = _optional_number(separation.get('minimum_separation_m'), True)
         separation_ttc_s = _optional_number(separation.get('time_to_conflict_s'), True)
+    prediction = report.get('prediction_summary')
+    track_rows = None
+    horizon_s = None
+    truncated_tracks = 0
+    if prediction is not None:
+        if not isinstance(prediction, dict) or prediction.get('frame') != 'world' or prediction.get('model') != 'constant_velocity':
+            raise ValueError('unsupported obstacle prediction scope')
+        horizon_s = _number(prediction.get('horizon_s'), True)
+        if not 0 < horizon_s <= 30:
+            raise ValueError('invalid prediction horizon')
+        total_tracks = prediction.get('total_tracks')
+        truncated_tracks = prediction.get('truncated_tracks')
+        raw_tracks = prediction.get('tracks')
+        if (type(total_tracks) is not int or total_tracks != count or
+                type(truncated_tracks) is not int or truncated_tracks < 0 or
+                not isinstance(raw_tracks, list) or len(raw_tracks) > 8 or
+                len(raw_tracks) + truncated_tracks != total_tracks):
+            raise ValueError('invalid bounded prediction list')
+        if level == 'STALE' and raw_tracks:
+            raise ValueError('stale report cannot show old tracks')
+        track_rows = []
+        seen_tracks = set()
+        for track in raw_tracks:
+            if not isinstance(track, dict):
+                raise ValueError('invalid predicted track')
+            identity = track.get('id')
+            observed = track.get('observed')
+            path = track.get('samples')
+            if (not isinstance(identity, str) or not identity or len(identity) > 64 or
+                    identity in seen_tracks or type(observed) is not bool or
+                    not isinstance(path, list) or len(path) != 3):
+                raise ValueError('invalid predicted track identity or samples')
+            seen_tracks.add(identity)
+            samples = []
+            for sample in path:
+                if not isinstance(sample, list) or len(sample) != 4:
+                    raise ValueError('invalid predicted sample')
+                values = [_number(axis) for axis in sample]
+                samples.append(values)
+            if (samples[0][0] != 0 or
+                    not 0 < samples[1][0] < samples[2][0] <= horizon_s + 0.01):
+                raise ValueError('invalid prediction times')
+            track_rows.append({'id': identity, 'observed': observed, 'samples': samples})
     return {
         'level': level,
         'obstacle_count': count,
@@ -93,4 +136,7 @@ def validate_risk_report(report):
         'separation_ttc_s': separation_ttc_s,
         'algorithm': algorithm,
         'plan_viable': viable,
+        'prediction_tracks': track_rows,
+        'prediction_horizon_s': horizon_s,
+        'prediction_truncated': truncated_tracks,
     }
