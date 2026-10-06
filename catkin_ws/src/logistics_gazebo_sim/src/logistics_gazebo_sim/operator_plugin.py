@@ -14,10 +14,12 @@ from logistics_gazebo_sim.fleet_operator_telemetry import validate_snapshot
 from logistics_gazebo_sim.operator_energy_view import validate_energy_advisory
 from logistics_gazebo_sim.operator_risk_view import validate_risk_report
 from logistics_gazebo_sim.operator_event_journal import OperatorEventJournal
+from logistics_gazebo_sim.operator_task_io import (build_operator_report, load_task,
+    validate_task, write_json_atomic)
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
-    QHeaderView, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
+    QFileDialog, QHeaderView, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
     QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 from qt_gui.plugin import Plugin
 from std_msgs.msg import String
@@ -67,6 +69,15 @@ class OperatorPlugin(Plugin):
         self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队避障（默认）",("collective_offset","shadow",True));self.avoidance_mode.addItem("ORCA 受限避障",("orca3d","limited",True));self.avoidance_mode.setToolTip("整队避障保持队形；ORCA 使用逐机受限控制。研究用影子模式通过 launch 配置。");form.addRow("局部避障模式",self.avoidance_mode)
         self.perception_source=QComboBox();self.perception_source.addItem("仿真感知（稳定）","perception");self.perception_source.addItem("物理 3D 雷达（实验）","lidar");self.perception_source.addItem("Gazebo 真值（对照）","truth");form.addRow("动态障碍数据源",self.perception_source)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
+        files_box=QGroupBox("任务参数与界面报告");files_row=QHBoxLayout(files_box)
+        self.save_task_button=QPushButton("保存任务参数")
+        self.load_task_button=QPushButton("加载任务参数")
+        self.reset_task_button=QPushButton("恢复默认参数")
+        self.export_report_button=QPushButton("导出界面报告")
+        self.export_report_button.setToolTip("只导出上位机快照，不代替飞行真值或安全验收报告")
+        for button in (self.save_task_button,self.load_task_button,
+                       self.reset_task_button,self.export_report_button):files_row.addWidget(button)
+        root.addWidget(files_box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
         self.analysis_state=QLabel("等待参数分析");self.analysis_state.setObjectName("analysisState")
@@ -153,6 +164,10 @@ class OperatorPlugin(Plugin):
         self.valid_analysis_signature=None;self.analysis_running_signature=None;self.analysis_mission=None;self.analysis_report=None;self.analysis_retry=0
         self.pick_mode="start";self.point_bridge=PointBridge();self.point_bridge.point_received.connect(self.apply_clicked_point)
         self.scene.currentIndexChanged.connect(self.update_defaults);self.start_sim.clicked.connect(self.launch_sim);self.stop_sim.clicked.connect(self.stop_simulation)
+        self.save_task_button.clicked.connect(self.save_task_preset)
+        self.load_task_button.clicked.connect(self.load_task_preset)
+        self.reset_task_button.clicked.connect(self.restore_task_defaults)
+        self.export_report_button.clicked.connect(self.export_operator_report)
         self.pick_start.clicked.connect(lambda:self.begin_pick("start"));self.pick_goal.clicked.connect(lambda:self.begin_pick("goal"))
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
         self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True)
@@ -173,6 +188,7 @@ class OperatorPlugin(Plugin):
         self.energy_last_rx=None;self.energy_stale_reported=False
         self.risk_last_rx=None;self.risk_stale_reported=False
         self.event_journal=OperatorEventJournal()
+        self.latest_vehicle_snapshot=None;self.latest_risk_snapshot=None;self.latest_energy_snapshot=None
         self.telemetry_timer=QTimer(self.widget);self.telemetry_timer.setInterval(1000)
         self.telemetry_timer.timeout.connect(self.check_operator_snapshot_age);self.telemetry_timer.start()
         self.energy_timer=QTimer(self.widget);self.energy_timer.setInterval(500)
@@ -185,6 +201,81 @@ class OperatorPlugin(Plugin):
         sx,sy,gx,gy,alt=SCENE_DEFAULTS[self.scene.currentData()]
         for widget,value in ((self.start_x,sx),(self.start_y,sy),(self.goal_x,gx),(self.goal_y,gy),(self.altitude,alt)):widget.setValue(value)
         QTimer.singleShot(50,self.publish_preview);self.schedule_analysis()
+    def task_configuration(self):
+        return validate_task({'schema':1,'scene_id':int(self.scene.currentData()),
+            'start_m':[self.start_x.value(),self.start_y.value()],
+            'goal_m':[self.goal_x.value(),self.goal_y.value()],
+            'altitude_m':self.altitude.value(),'formation':str(self.formation.currentData()),
+            'dynamic_obstacles':self.dynamic_enabled.isChecked(),
+            'avoidance_mode':self.avoidance_mode.currentData()[0],
+            'perception_source':str(self.perception_source.currentData())})
+    def task_configuration_locked(self):
+        return self.process.state()!=QProcess.NotRunning or bool(self.active_runtime_processes())
+    def apply_task_configuration(self,task):
+        task=validate_task(task)
+        controls=(self.scene,self.start_x,self.start_y,self.goal_x,self.goal_y,
+                  self.altitude,self.formation,self.dynamic_enabled,
+                  self.avoidance_mode,self.perception_source)
+        prior=[control.blockSignals(True) for control in controls]
+        try:
+            self.scene.setCurrentIndex(task['scene_id'])
+            for control,value in ((self.start_x,task['start_m'][0]),
+                                  (self.start_y,task['start_m'][1]),
+                                  (self.goal_x,task['goal_m'][0]),
+                                  (self.goal_y,task['goal_m'][1]),
+                                  (self.altitude,task['altitude_m'])):control.setValue(value)
+            self.formation.setCurrentIndex(self.formation.findData(task['formation']))
+            self.dynamic_enabled.setChecked(task['dynamic_obstacles'])
+            for index in range(self.avoidance_mode.count()):
+                if self.avoidance_mode.itemData(index)[0]==task['avoidance_mode']:
+                    self.avoidance_mode.setCurrentIndex(index);break
+            self.perception_source.setCurrentIndex(self.perception_source.findData(task['perception_source']))
+        finally:
+            for control,was_blocked in zip(controls,prior):control.blockSignals(was_blocked)
+        self.clear_runtime_markers();self.publish_preview();self.schedule_analysis()
+    def save_task_preset(self):
+        path,_=QFileDialog.getSaveFileName(self.widget,"保存任务参数","mission_preset.json","JSON 文件 (*.json)")
+        if not path:return
+        try:write_json_atomic(path,self.task_configuration())
+        except (OSError,TypeError,ValueError) as exc:
+            QMessageBox.warning(self.widget,"保存失败",str(exc));return
+        self.state.setText("任务参数已保存；这不是规划验收文件")
+    def load_task_preset(self):
+        if self.task_configuration_locked():
+            QMessageBox.warning(self.widget,"任务正在运行","请先停止仿真，再加载任务参数。")
+            return
+        path,_=QFileDialog.getOpenFileName(self.widget,"加载任务参数","","JSON 文件 (*.json)")
+        if not path:return
+        try:self.apply_task_configuration(load_task(path))
+        except (OSError,TypeError,ValueError) as exc:
+            QMessageBox.warning(self.widget,"加载失败",str(exc));return
+        self.state.setText("任务参数已加载；等待重新规划")
+    def restore_task_defaults(self):
+        if self.task_configuration_locked():
+            QMessageBox.warning(self.widget,"任务正在运行","请先停止仿真，再恢复默认参数。")
+            return
+        sx,sy,gx,gy,alt=SCENE_DEFAULTS[0]
+        self.apply_task_configuration({'schema':1,'scene_id':0,'start_m':[sx,sy],
+            'goal_m':[gx,gy],'altitude_m':alt,'formation':'triangle',
+            'dynamic_obstacles':True,'avoidance_mode':'collective_offset',
+            'perception_source':'perception'})
+        self.state.setText("已恢复默认参数；等待重新规划")
+    def export_operator_report(self):
+        path,_=QFileDialog.getSaveFileName(self.widget,"导出上位机界面报告",
+                                           "operator_snapshot.json","JSON 文件 (*.json)")
+        if not path:return
+        try:
+            planning={'approved':bool(self.valid_analysis_signature==self.parameter_signature() and
+                                      self.analysis_mission and os.path.isfile(self.analysis_mission) and
+                                      self.analysis_report and os.path.isfile(self.analysis_report)),
+                      'status':self.analysis_state.text(),'detail':self.analysis_detail.text()}
+            report=build_operator_report(self.task_configuration(),planning,
+                self.latest_vehicle_snapshot,self.latest_risk_snapshot,
+                self.latest_energy_snapshot,self.event_journal.rows)
+            write_json_atomic(path,report)
+        except (OSError,TypeError,ValueError) as exc:
+            QMessageBox.warning(self.widget,"导出失败",str(exc));return
+        self.state.setText("界面报告已导出；不代替飞行安全审计")
     def parameter_signature(self):
         return (int(self.scene.currentData()),round(self.start_x.value(),3),
                 round(self.start_y.value(),3),round(self.goal_x.value(),3),
@@ -495,6 +586,7 @@ class OperatorPlugin(Plugin):
             report=validate_risk_report(json.loads(msg.data))
         except (TypeError,ValueError):
             self.risk_last_rx=None;self.risk_stale_reported=True
+            self.latest_risk_snapshot=None
             self.dynamic_risk.setText("动态风险数据无效，状态未知")
             self.risk_summary.setText("风险报告无效，旧预测已隐藏")
             self.prediction_summary.setText("轨迹报告无效，旧预测已隐藏")
@@ -503,6 +595,7 @@ class OperatorPlugin(Plugin):
             return
         self.risk_last_rx=time.monotonic();self.risk_stale_reported=False
         level=report['level'];rows=report['rows']
+        self.latest_risk_snapshot=report
         if self.event_journal.risk(level,time.time()):self.render_events()
         level_names={"SAFE":"安全","WARNING":"警告","CRITICAL":"严重","STALE":"数据过期"}
         text="{} | 动态障碍 {} 个".format(level_names[level],report['obstacle_count'])
@@ -570,6 +663,7 @@ class OperatorPlugin(Plugin):
                 time.monotonic()-self.risk_last_rx>1.5 and
                 not self.risk_stale_reported):
             self.risk_stale_reported=True
+            self.latest_risk_snapshot=None
             self.dynamic_risk.setText("动态风险报告中断，状态未知")
             self.risk_summary.setText("风险报告中断，旧预测已隐藏")
             self.prediction_summary.setText("风险报告中断，旧轨迹已隐藏")
@@ -590,11 +684,13 @@ class OperatorPlugin(Plugin):
             advisory=validate_energy_advisory(json.loads(msg.data))
         except (TypeError,ValueError):
             self.energy_last_rx=None;self.energy_stale_reported=True
+            self.latest_energy_snapshot=None
             self.energy_return.setText("能量返航数据格式错误，建议保持")
             self.energy_summary.setText("建议无效，旧数据已隐藏")
             self.energy_table.setRowCount(0);return
         self.energy_last_rx=time.monotonic();self.energy_stale_reported=False
         level=advisory['level'];rows=advisory['rows']
+        self.latest_energy_snapshot=advisory
         names={"NORMAL":"正常","LOW":"低余量，建议返航","CRITICAL":"临界，建议备用点降落","STALE":"数据过期，建议保持"}
         text=names[level]+" | 影子模式（不下发控制）"
         if rows:text+=" | 最低预计落地余量 {:.1f} Wh".format(min(row['final_margin_wh'] for row in rows))
@@ -621,14 +717,17 @@ class OperatorPlugin(Plugin):
                 time.monotonic()-self.energy_last_rx>2.5 and
                 not self.energy_stale_reported):
             self.energy_stale_reported=True
+            self.latest_energy_snapshot=None
             self.energy_return.setText("能量返航建议已中断，建议保持")
             self.energy_summary.setText("返航建议中断，旧数据已隐藏")
             self.energy_table.setRowCount(0)
     def operator_snapshot_cb(self,msg):
         try:vehicles=validate_snapshot(json.loads(msg.data))
         except (TypeError,ValueError):
+            self.latest_vehicle_snapshot=None
             self.vehicle_summary.setText("车辆遥测格式错误");self.vehicle_table.setRowCount(0);return
         self.telemetry_last_rx=time.monotonic();self.telemetry_stale_reported=False
+        self.latest_vehicle_snapshot=vehicles
         active=sum(item["status"]=="ARMED" for item in vehicles)
         stale=sum(item["status"]=="STALE" for item in vehicles)
         self.vehicle_summary.setText("{} 架在线快照 · {} 架已解锁 · {} 架遥测过期".format(len(vehicles),active,stale))
@@ -656,6 +755,7 @@ class OperatorPlugin(Plugin):
                 time.monotonic()-self.telemetry_last_rx>3.0 and
                 not self.telemetry_stale_reported):
             self.telemetry_stale_reported=True
+            self.latest_vehicle_snapshot=None
             self.vehicle_summary.setText("车辆遥测汇总已中断，旧数据已隐藏")
             self.vehicle_table.setRowCount(0)
     def shutdown_plugin(self):

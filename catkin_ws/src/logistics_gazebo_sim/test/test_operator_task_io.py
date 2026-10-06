@@ -1,0 +1,63 @@
+import json
+import math
+import os
+import tempfile
+import unittest
+
+from logistics_gazebo_sim.operator_task_io import (
+    build_operator_report, load_task, validate_task, write_json_atomic)
+
+
+def task():
+    return {'schema': 1, 'scene_id': 0, 'start_m': [-40, -40],
+            'goal_m': [45, 45], 'altitude_m': 8, 'formation': 'triangle',
+            'dynamic_obstacles': True, 'avoidance_mode': 'collective_offset',
+            'perception_source': 'perception'}
+
+
+class OperatorTaskIOTest(unittest.TestCase):
+    def test_task_roundtrip_is_bounded_and_normalized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'mission.json')
+            write_json_atomic(path, validate_task(task()))
+            self.assertEqual(load_task(path), validate_task(task()))
+            self.assertFalse(any(name.endswith('.tmp') for name in os.listdir(directory)))
+
+    def test_bad_preset_is_rejected_before_ui_mutation(self):
+        for change in (
+                {'scene_id': 7}, {'start_m': [math.nan, 0]},
+                {'altitude_m': 50}, {'formation': 'unknown'},
+                {'dynamic_obstacles': 1}, {'avoidance_mode': 'distributed_mpc'}):
+            bad = dict(task(), **change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                validate_task(bad)
+
+    def test_large_file_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'large.json')
+            with open(path, 'w', encoding='utf-8') as stream:
+                stream.write(' ' * 65537)
+            with self.assertRaises(ValueError):
+                load_task(path)
+
+    def test_report_is_explicitly_ui_only_and_atomic(self):
+        event = {'source': '安全联锁', 'level': 'ERROR',
+                 'title': '安全联锁保持', 'guidance': '检查机间距'}
+        report = build_operator_report(task(), {'approved': False,
+            'status': '等待重新规划', 'detail': '旧规划已失效'}, None, None, None, [event])
+        self.assertEqual(report['kind'], 'operator_ui_snapshot')
+        self.assertFalse(report['planning']['approved'])
+        self.assertIn('not a flight safety audit', report['scope'])
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'report.json')
+            write_json_atomic(path, report)
+            with open(path, encoding='utf-8') as stream:
+                self.assertEqual(json.load(stream)['events'][0]['title'], '安全联锁保持')
+            with self.assertRaises(ValueError):
+                write_json_atomic(path, {'invalid': math.nan})
+            with open(path, encoding='utf-8') as stream:
+                self.assertEqual(json.load(stream)['kind'], 'operator_ui_snapshot')
+
+
+if __name__ == '__main__':
+    unittest.main()
