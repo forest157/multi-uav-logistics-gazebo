@@ -12,6 +12,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from logistics_gazebo_sim.scenes import SCENES, SCALE, metric_xy
 from logistics_gazebo_sim.fleet_operator_telemetry import validate_snapshot
 from logistics_gazebo_sim.operator_energy_view import validate_energy_advisory
+from logistics_gazebo_sim.operator_risk_view import validate_risk_report
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
@@ -91,6 +92,18 @@ class OperatorPlugin(Plugin):
         self.vehicle_table.setMinimumHeight(250)
         fleet_layout.addWidget(self.vehicle_summary);fleet_layout.addWidget(self.vehicle_table)
         root.addWidget(fleet_box)
+        risk_box=QGroupBox("动态冲突预测 · 只读");risk_layout=QVBoxLayout(risk_box)
+        self.risk_summary=QLabel("等待动态风险报告")
+        self.risk_table=QTableWidget(0,6)
+        self.risk_table.setHorizontalHeaderLabels(["车辆","风险","冲突对象","预测最小净空","碰撞倒计时","最近点（预测）"])
+        self.risk_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.risk_table.setSelectionMode(QTableWidget.NoSelection)
+        self.risk_table.setAlternatingRowColors(True)
+        self.risk_table.verticalHeader().setVisible(False)
+        self.risk_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.risk_table.setMinimumHeight(230)
+        risk_layout.addWidget(self.risk_summary);risk_layout.addWidget(self.risk_table)
+        root.addWidget(risk_box)
         energy_box=QGroupBox("返航能量建议 · 只读影子模式");energy_layout=QVBoxLayout(energy_box)
         self.energy_summary=QLabel("等待能量返航建议")
         self.energy_table=QTableWidget(0,5)
@@ -135,10 +148,13 @@ class OperatorPlugin(Plugin):
         self.ros_subscribers.append(rospy.Subscriber("/fleet/operator_snapshot",String,lambda msg:self.ros_ui_bridge.telemetry_received.emit(msg),queue_size=1))
         self.telemetry_last_rx=None;self.telemetry_stale_reported=False
         self.energy_last_rx=None;self.energy_stale_reported=False
+        self.risk_last_rx=None;self.risk_stale_reported=False
         self.telemetry_timer=QTimer(self.widget);self.telemetry_timer.setInterval(1000)
         self.telemetry_timer.timeout.connect(self.check_operator_snapshot_age);self.telemetry_timer.start()
         self.energy_timer=QTimer(self.widget);self.energy_timer.setInterval(500)
         self.energy_timer.timeout.connect(self.check_energy_advisory_age);self.energy_timer.start()
+        self.risk_timer=QTimer(self.widget);self.risk_timer.setInterval(500)
+        self.risk_timer.timeout.connect(self.check_dynamic_risk_age);self.risk_timer.start()
         self.update_defaults()
     def update_defaults(self):
         self.clear_runtime_markers()
@@ -429,24 +445,57 @@ class OperatorPlugin(Plugin):
         s=msg.status[0];v={x.key:x.value for x in s.values};self.safety.setText("{} | \u95f4\u8ddd {}m | \u51c0\u7a7a {}m | \u8bef\u5dee {}m".format(s.message,v.get("min_separation_m","-"),v.get("min_obstacle_clearance_m","-"),v.get("max_tracking_error_m","-")));self.safety.setStyleSheet("color:{}".format("#c62828" if s.level>=2 else "#ef6c00" if s.level==1 else "#2e7d32"))
     def dynamic_risk_cb(self,msg):
         try:
-            value=json.loads(msg.data);level=value.get("level","STALE")
-            if level=="STALE":text=value.get("message","等待动态障碍数据")
-            else:text="{} | 最近 {} | 净空 {}m | 冲突倒计时 {}s".format(level,value.get("nearest_vehicle","-"),value.get("minimum_clearance_m","-"),value.get("time_to_conflict_s","无"))
-            avoidance=value.get("avoidance") or {}
-            algorithm=avoidance.get("algorithm") or value.get("local_avoidance_algorithm")
-            if algorithm:text+=" | 算法 {}".format(algorithm)
-            if avoidance.get("viable") and avoidance.get("command_type")=="per_vehicle_velocity":
-                text+=" | ORCA速度建议 {} 架（{}）".format(len(avoidance.get("commands") or []),"受限接管" if self.avoidance_mode.currentData()[1]=="limited" else "影子模式")
-            elif avoidance.get("viable") and avoidance.get("command_type")=="per_vehicle_trajectory":
-                timing=avoidance.get("solve_time_ms") or {};text+=" | MPC影子轨迹 {} 架 | 求解 {} ms | 暖启动 {} 架 | 一致性 {}".format(len(avoidance.get("trajectories") or []),timing.get("total","-"),avoidance.get("warm_started_vehicle_count",0),avoidance.get("consensus_strength",0))
-            elif avoidance.get("viable"):text+=" | 建议整队偏移 {}".format(avoidance.get("selected_offset"))
-            elif level in ("WARNING","CRITICAL"):
-                summary=avoidance.get("rejection_summary") or {};names={"DYNAMIC_CONFLICT":"动态冲突","DYNAMIC_CLEARANCE":"动态净空不足","MPC_SOLVER_FAILURE":"MPC 求解失败","MPC_SOLVER_TIMEOUT":"MPC 求解超时","NOMINAL_VEHICLE_SEPARATION":"名义轨迹机间距不足","E_BOUNDARY":"越界","E_VERTICAL_CLEARANCE":"高度违规","E_CORRIDOR_TOO_NARROW":"建筑净空不足"}
-                reasons="、".join("{}×{}".format(names.get(key,key),count) for key,count in sorted(summary.items()))
-                text+=" | 无安全候选，保持悬停"+("（{}）".format(reasons) if reasons else "")
-            self.dynamic_risk.setText(text)
-            self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
-        except (TypeError,ValueError):self.dynamic_risk.setText("动态风险数据格式错误")
+            report=validate_risk_report(json.loads(msg.data))
+        except (TypeError,ValueError):
+            self.risk_last_rx=None;self.risk_stale_reported=True
+            self.dynamic_risk.setText("动态风险数据无效，状态未知")
+            self.risk_summary.setText("风险报告无效，旧预测已隐藏")
+            self.risk_table.setRowCount(0);return
+        self.risk_last_rx=time.monotonic();self.risk_stale_reported=False
+        level=report['level'];rows=report['rows']
+        level_names={"SAFE":"安全","WARNING":"警告","CRITICAL":"严重","STALE":"数据过期"}
+        text="{} | 动态障碍 {} 个".format(level_names[level],report['obstacle_count'])
+        algorithm=report['algorithm']
+        if algorithm is not None:
+            text+=" | {}".format({'collective_offset':'整队避障','orca3d':'ORCA',
+                                     'distributed_mpc':'MPC'}[algorithm])
+        if level in ('WARNING','CRITICAL') and report['plan_viable'] is not None:
+            text+=" | {}".format('有候选建议' if report['plan_viable'] else '无可用建议，查看安全状态')
+        self.dynamic_risk.setText(text)
+        self.dynamic_risk.setStyleSheet("color:{}".format({"CRITICAL":"#c62828","WARNING":"#ef6c00","SAFE":"#2e7d32"}.get(level,"#607d8b")))
+        if level=='STALE':
+            self.risk_summary.setText("动态障碍或机体状态过期，冲突预测不可用")
+            self.risk_table.setRowCount(0);return
+        pair=report['closest_pair'];separation=report['minimum_separation_m']
+        summary="{} 架预测 · {} 个动态障碍".format(len(rows),report['obstacle_count'])
+        if pair is not None and separation is not None:
+            summary+=" | 最近机间距 {}–{}：{:.2f} m".format(pair[0],pair[1],separation)
+        if report['separation_ttc_s'] is not None:
+            summary+=" | 机间冲突倒计时 {:.1f} s".format(report['separation_ttc_s'])
+        if level=='CRITICAL' and not rows:summary+=" | 风险计算或机间安全异常，请看任务安全状态"
+        self.risk_summary.setText(summary)
+        self.risk_table.setRowCount(len(rows))
+        colors={"SAFE":"#66bb6a","WARNING":"#ffb74d","CRITICAL":"#ef5350"}
+        for index,row in enumerate(rows):
+            point=row['closest_position_m']
+            values=[row['vehicle_id'],level_names[row['level']],row['obstacle_id'] or "-",
+                    "{:.2f} m".format(row['clearance_m']) if row['clearance_m'] is not None else "-",
+                    "{:.1f} s".format(row['time_to_conflict_s']) if row['time_to_conflict_s'] is not None else "无",
+                    "({:.1f}, {:.1f}, {:.1f})".format(*point) if point is not None else "-"]
+            for column,value in enumerate(values):
+                cell=QTableWidgetItem(value)
+                if column==1:cell.setForeground(QColor(colors[row['level']]))
+                if column==5 and row['closest_time_s'] is not None:
+                    cell.setToolTip("预测 {:.1f} s 后的最近点；不是实测位置".format(row['closest_time_s']))
+                self.risk_table.setItem(index,column,cell)
+    def check_dynamic_risk_age(self):
+        if (self.risk_last_rx is not None and
+                time.monotonic()-self.risk_last_rx>1.5 and
+                not self.risk_stale_reported):
+            self.risk_stale_reported=True
+            self.dynamic_risk.setText("动态风险报告中断，状态未知")
+            self.risk_summary.setText("风险报告中断，旧预测已隐藏")
+            self.risk_table.setRowCount(0)
     def perception_status_cb(self,msg):
         try:
             value=json.loads(msg.data);state=value.get("state","UNKNOWN")
@@ -531,7 +580,7 @@ class OperatorPlugin(Plugin):
             self.vehicle_summary.setText("车辆遥测汇总已中断，旧数据已隐藏")
             self.vehicle_table.setRowCount(0)
     def shutdown_plugin(self):
-        self.analysis_timer.stop();self.analysis_timeout.stop();self.telemetry_timer.stop();self.energy_timer.stop()
+        self.analysis_timer.stop();self.analysis_timeout.stop();self.telemetry_timer.stop();self.energy_timer.stop();self.risk_timer.stop()
         for subscriber in self.ros_subscribers:subscriber.unregister()
         if self.analysis_process.state()!=QProcess.NotRunning:self.analysis_process.kill();self.analysis_process.waitForFinished(1000)
         self.stop_simulation()
