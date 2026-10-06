@@ -13,6 +13,7 @@ from logistics_gazebo_sim.scenes import SCENES, SCALE, metric_xy
 from logistics_gazebo_sim.fleet_operator_telemetry import validate_snapshot
 from logistics_gazebo_sim.operator_energy_view import validate_energy_advisory
 from logistics_gazebo_sim.operator_risk_view import validate_risk_report
+from logistics_gazebo_sim.operator_event_journal import OperatorEventJournal
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
@@ -125,7 +126,19 @@ class OperatorPlugin(Plugin):
         self.energy_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.energy_table.setMinimumHeight(190)
         energy_layout.addWidget(self.energy_summary);energy_layout.addWidget(self.energy_table)
-        root.addWidget(energy_box);root.addStretch()
+        root.addWidget(energy_box)
+        events_box=QGroupBox("规划与安全事件 · 最近 50 条");events_layout=QVBoxLayout(events_box)
+        self.event_summary=QLabel("暂无事件；仅记录状态变化，不重复记录每帧遥测")
+        self.event_table=QTableWidget(0,4)
+        self.event_table.setHorizontalHeaderLabels(["时间","来源","事件","恢复建议/原因"])
+        self.event_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.event_table.setSelectionMode(QTableWidget.NoSelection)
+        self.event_table.setAlternatingRowColors(True)
+        self.event_table.verticalHeader().setVisible(False)
+        self.event_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.event_table.setMinimumHeight(260)
+        events_layout.addWidget(self.event_summary);events_layout.addWidget(self.event_table)
+        root.addWidget(events_box);root.addStretch()
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setWidget(self.widget)
         context.add_widget(self.scroll)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
@@ -159,6 +172,7 @@ class OperatorPlugin(Plugin):
         self.telemetry_last_rx=None;self.telemetry_stale_reported=False
         self.energy_last_rx=None;self.energy_stale_reported=False
         self.risk_last_rx=None;self.risk_stale_reported=False
+        self.event_journal=OperatorEventJournal()
         self.telemetry_timer=QTimer(self.widget);self.telemetry_timer.setInterval(1000)
         self.telemetry_timer.timeout.connect(self.check_operator_snapshot_age);self.telemetry_timer.start()
         self.energy_timer=QTimer(self.widget);self.energy_timer.setInterval(500)
@@ -219,6 +233,7 @@ class OperatorPlugin(Plugin):
         self.analysis_state.setText("分析超时")
         self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
         self.analysis_detail.setText("规划超过20秒，请调整起终点、高度或队形后重试。")
+        self.record_planning_event("TIMEOUT")
     def analysis_finished(self,exit_code,_exit_status):
         self.analysis_timeout.stop()
         signature=self.analysis_running_signature;self.analysis_running_signature=None
@@ -257,7 +272,9 @@ class OperatorPlugin(Plugin):
             else:
                 self.analysis_state.setText("当前参数不可执行")
                 self.analysis_detail.setText(self.planning_error(detail)[:700])
-            self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;");return
+            self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
+            self.record_planning_event(diagnostic.get("category") if diagnostic else "UNKNOWN")
+            return
         try:
             with open(self.analysis_report,"r",encoding="utf-8") as stream:report=json.load(stream)
             clearance=report["clearance_analysis"];trajectory=report["trajectory_parameterization"];stages=report["stages"];phases=report.get("phase_analysis",{});formation_schedule=report.get("formation_schedule",{})
@@ -281,7 +298,8 @@ class OperatorPlugin(Plugin):
             self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
             self.analysis_state.setText("分析报告无效")
             self.analysis_state.setStyleSheet("color:#ef5350;border-color:#8d3434;")
-            self.analysis_detail.setText("无法读取规划摘要：{}".format(exc));return
+            self.analysis_detail.setText("无法读取规划摘要：{}".format(exc))
+            self.record_planning_event("INTERNAL");return
         self.valid_analysis_signature=signature;self.start_sim.setEnabled(True)
     def active_runtime_processes(self):
         result=[]
@@ -440,6 +458,23 @@ class OperatorPlugin(Plugin):
     def call(self,name):
         try:r=rospy.ServiceProxy(name,Trigger)();self.state.setText(r.message)
         except rospy.ServiceException as exc:QMessageBox.warning(self.widget,"\u670d\u52a1\u8c03\u7528\u5931\u8d25",str(exc))
+    def render_events(self):
+        rows=self.event_journal.rows
+        self.event_summary.setText("最近 {} 条事件 · 状态变化去重 · 仅供操作员判断".format(len(rows)))
+        self.event_table.setRowCount(len(rows))
+        colors={"ERROR":"#ef5350","WARN":"#ffb74d","INFO":"#66bb6a"}
+        for index,event in enumerate(rows):
+            values=[time.strftime("%H:%M:%S",time.localtime(event['time'])),
+                    event['source'],event['title'],event['guidance']]
+            for column,value in enumerate(values):
+                cell=QTableWidgetItem(value)
+                if column==2:cell.setForeground(QColor(colors[event['level']]))
+                if column==3:cell.setToolTip(value)
+                self.event_table.setItem(index,column,cell)
+    def record_planning_event(self,category):
+        if self.event_journal.planning_failure(category,self.analysis_state.text(),
+                                               self.analysis_detail.text(),time.time()):
+            self.render_events()
     def state_cb(self,msg):
         try:
             d=json.loads(msg.data)
@@ -449,10 +484,12 @@ class OperatorPlugin(Plugin):
                     "Gazebo、三机 PX4 与任务节点已连接，可以开始任务。")
             self.state.setText(d["state"]);ph={"TAKEOFF_HOLD":"\u8d77\u98de\u7b49\u5f85","DEPARTURE_FORMATION":"\u51fa\u53d1\u7f16\u961f","OUTBOUND":"\u524d\u5f80\u914d\u9001\u70b9","DELIVERY_FORMATION":"\u6295\u9012\u4e00\u5b57\u7f16\u961f","DELIVERY_DESCENT":"\u6295\u9012\u4e0b\u964d","DELIVERY_RELEASE":"\u8d27\u7269\u6295\u9012","DELIVERY_ASCENT":"\u6295\u9012\u56de\u5347","CRUISE_REFORMATION":"\u6062\u590d\u5de1\u822a\u961f\u5f62","RETURN":"\u8fd4\u822a","HOME_FORMATION":"\u8fd4\u822a\u7f16\u961f","HOME_DESCENT":"\u8d77\u70b9\u964d\u843d"};self.stage.setText("{} - {}".format(d["stage"],ph.get(d.get("phase"),"-")))
             self.progress.setValue(int(1000*d["progress"]))
+            if self.event_journal.mission(d,time.time()):self.render_events()
         except Exception:pass
     def diag_cb(self,msg):
         if not msg.status:return
         s=msg.status[0];v={x.key:x.value for x in s.values};self.safety.setText("{} | \u95f4\u8ddd {}m | \u51c0\u7a7a {}m | \u8bef\u5dee {}m".format(s.message,v.get("min_separation_m","-"),v.get("min_obstacle_clearance_m","-"),v.get("max_tracking_error_m","-")));self.safety.setStyleSheet("color:{}".format("#c62828" if s.level>=2 else "#ef6c00" if s.level==1 else "#2e7d32"))
+        if self.event_journal.diagnostic(int(s.level),s.message,time.time()):self.render_events()
     def dynamic_risk_cb(self,msg):
         try:
             report=validate_risk_report(json.loads(msg.data))
@@ -461,9 +498,12 @@ class OperatorPlugin(Plugin):
             self.dynamic_risk.setText("动态风险数据无效，状态未知")
             self.risk_summary.setText("风险报告无效，旧预测已隐藏")
             self.prediction_summary.setText("轨迹报告无效，旧预测已隐藏")
-            self.risk_table.setRowCount(0);self.prediction_table.setRowCount(0);return
+            self.risk_table.setRowCount(0);self.prediction_table.setRowCount(0)
+            if self.event_journal.risk('STALE',time.time()):self.render_events()
+            return
         self.risk_last_rx=time.monotonic();self.risk_stale_reported=False
         level=report['level'];rows=report['rows']
+        if self.event_journal.risk(level,time.time()):self.render_events()
         level_names={"SAFE":"安全","WARNING":"警告","CRITICAL":"严重","STALE":"数据过期"}
         text="{} | 动态障碍 {} 个".format(level_names[level],report['obstacle_count'])
         algorithm=report['algorithm']
@@ -534,6 +574,7 @@ class OperatorPlugin(Plugin):
             self.risk_summary.setText("风险报告中断，旧预测已隐藏")
             self.prediction_summary.setText("风险报告中断，旧轨迹已隐藏")
             self.risk_table.setRowCount(0);self.prediction_table.setRowCount(0)
+            if self.event_journal.risk('STALE',time.time()):self.render_events()
     def perception_status_cb(self,msg):
         try:
             value=json.loads(msg.data);state=value.get("state","UNKNOWN")
