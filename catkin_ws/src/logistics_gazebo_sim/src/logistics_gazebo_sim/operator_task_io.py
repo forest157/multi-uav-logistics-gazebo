@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 
 FORMATIONS = ('triangle', 'inverted', 'row', 'column', 'vertical', 'wedge3d', 'helix')
-AVOIDANCE = ('collective_offset', 'orca3d')
+AVOIDANCE = ('collective_offset', 'orca3d', 'distributed_mpc')
 PERCEPTION = ('perception', 'lidar', 'truth')
 
 
@@ -35,12 +35,16 @@ def validate_task(task):
     avoidance = task.get('avoidance_mode')
     perception = task.get('perception_source')
     dynamic = task.get('dynamic_obstacles')
+    orca_speed = _number(task.get('orca_max_speed_mps', 2.0), 0.5, 2.0)
+    orca_timeout = _number(task.get('orca_command_timeout_s', 0.6), 0.3, 0.6)
     if formation not in FORMATIONS or avoidance not in AVOIDANCE or perception not in PERCEPTION or type(dynamic) is not bool:
         raise ValueError('invalid task mode')
     return {'schema': 1, 'scene_id': scene, 'start_m': points[0], 'goal_m': points[1],
             'altitude_m': altitude, 'formation': formation,
             'dynamic_obstacles': dynamic, 'avoidance_mode': avoidance,
-            'perception_source': perception}
+            'perception_source': perception,
+            'orca_max_speed_mps': orca_speed,
+            'orca_command_timeout_s': orca_timeout}
 
 
 def load_task(path):

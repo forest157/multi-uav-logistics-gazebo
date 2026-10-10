@@ -27,7 +27,8 @@ class OperatorTaskIOTest(unittest.TestCase):
         for change in (
                 {'scene_id': 7}, {'start_m': [math.nan, 0]},
                 {'altitude_m': 50}, {'formation': 'unknown'},
-                {'dynamic_obstacles': 1}, {'avoidance_mode': 'distributed_mpc'}):
+                {'dynamic_obstacles': 1}, {'avoidance_mode': 'unknown'},
+                {'orca_max_speed_mps': 3.0}, {'orca_command_timeout_s': 0.8}):
             bad = dict(task(), **change)
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validate_task(bad)
@@ -39,6 +40,13 @@ class OperatorTaskIOTest(unittest.TestCase):
                 stream.write(' ' * 65537)
             with self.assertRaises(ValueError):
                 load_task(path)
+
+    def test_older_presets_keep_conservative_orca_defaults(self):
+        normalized = validate_task(task())
+        self.assertEqual(normalized['orca_max_speed_mps'], 2.0)
+        self.assertEqual(normalized['orca_command_timeout_s'], 0.6)
+        shadow = dict(task(), avoidance_mode='distributed_mpc')
+        self.assertEqual(validate_task(shadow)['avoidance_mode'], 'distributed_mpc')
 
     def test_report_is_explicitly_ui_only_and_atomic(self):
         event = {'source': '安全联锁', 'level': 'ERROR',

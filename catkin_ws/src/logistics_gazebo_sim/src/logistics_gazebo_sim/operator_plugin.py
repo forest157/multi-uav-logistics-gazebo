@@ -16,6 +16,8 @@ from logistics_gazebo_sim.operator_risk_view import validate_risk_report
 from logistics_gazebo_sim.operator_event_journal import OperatorEventJournal
 from logistics_gazebo_sim.operator_task_io import (build_operator_report, load_task,
     validate_task, write_json_atomic)
+from logistics_gazebo_sim.operator_config_info import (algorithm_profile,
+    scene_identity, source_identity)
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
@@ -40,6 +42,9 @@ class OperatorPlugin(Plugin):
         super().__init__(context); self.setObjectName("LogisticsOperator")
         self.widget=QWidget();self.widget.setWindowTitle("无人机物流仿真上位机");self.widget.setMinimumWidth(680);root=QVBoxLayout(self.widget);root.setContentsMargins(16,14,16,16);root.setSpacing(10)
         package_path=rospkg.RosPack().get_path("logistics_gazebo_sim")
+        self.package_path=package_path
+        self.build_identity=source_identity(package_path)
+        self.scene_identity_cache={}
         header=QHBoxLayout();header.setSpacing(14)
         logo=QLabel();logo.setObjectName("brandLogo");logo.setFixedSize(84,84);logo.setAlignment(Qt.AlignCenter)
         logo_path=os.path.join(package_path,"resources","nuaa.jpg");pixmap=QPixmap(logo_path)
@@ -66,7 +71,11 @@ class OperatorPlugin(Plugin):
         self.formation.addItem("纵向一字队形（窄通道）","column");self.formation.addItem("垂直错层队形","vertical");self.formation.addItem("三维楔形队形","wedge3d");self.formation.addItem("三维螺旋队形","helix")
         self.dynamic_enabled=QCheckBox("启用交叉移动障碍物与在线风险预测");self.dynamic_enabled.setChecked(True)
         form.addRow("动态避障实验",self.dynamic_enabled)
-        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队避障（默认）",("collective_offset","shadow",True));self.avoidance_mode.addItem("ORCA 受限避障",("orca3d","limited",True));self.avoidance_mode.setToolTip("整队避障保持队形；ORCA 使用逐机受限控制。研究用影子模式通过 launch 配置。");form.addRow("局部避障模式",self.avoidance_mode)
+        self.avoidance_mode=QComboBox();self.avoidance_mode.addItem("整队避障（推荐）",("collective_offset","shadow",True));self.avoidance_mode.addItem("ORCA 受限接管",("orca3d","limited",True));self.avoidance_mode.addItem("MPC＋ORCA 对照（仅影子）",("distributed_mpc","shadow",False));self.avoidance_mode.setToolTip("只有整队偏移和 ORCA 受限模式可接管；MPC 与 ORCA 回退仅计算候选，不下发轨迹。");form.addRow("局部避障模式",self.avoidance_mode)
+        self.orca_max_speed=QDoubleSpinBox();self.orca_max_speed.setRange(0.5,2.0);self.orca_max_speed.setDecimals(1);self.orca_max_speed.setSingleStep(0.1);self.orca_max_speed.setSuffix(" m/s");self.orca_max_speed.setValue(2.0)
+        self.orca_timeout=QDoubleSpinBox();self.orca_timeout.setRange(0.3,0.6);self.orca_timeout.setDecimals(2);self.orca_timeout.setSingleStep(0.05);self.orca_timeout.setSuffix(" s");self.orca_timeout.setValue(0.6)
+        orca_row=QHBoxLayout();orca_row.addWidget(QLabel("速度上限"));orca_row.addWidget(self.orca_max_speed);orca_row.addWidget(QLabel("指令超时"));orca_row.addWidget(self.orca_timeout)
+        form.addRow("ORCA 安全参数",orca_row)
         self.perception_source=QComboBox();self.perception_source.addItem("仿真感知（稳定）","perception");self.perception_source.addItem("物理 3D 雷达（实验）","lidar");self.perception_source.addItem("Gazebo 真值（对照）","truth");form.addRow("动态障碍数据源",self.perception_source)
         simrow=QHBoxLayout();self.start_sim=QPushButton("\u89c4\u5212\u5e76\u542f\u52a8\u4e09\u673a\u4eff\u771f");self.stop_sim=QPushButton("\u505c\u6b62\u4eff\u771f");simrow.addWidget(self.start_sim);simrow.addWidget(self.stop_sim);form.addRow(simrow);root.addWidget(box)
         files_box=QGroupBox("任务参数与界面报告");files_row=QHBoxLayout(files_box)
@@ -78,6 +87,10 @@ class OperatorPlugin(Plugin):
         for button in (self.save_task_button,self.load_task_button,
                        self.reset_task_button,self.export_report_button):files_row.addWidget(button)
         root.addWidget(files_box)
+        config_box=QGroupBox("版本与下次启动配置");config_layout=QVBoxLayout(config_box)
+        self.config_summary=QLabel("正在读取源码与场景版本…")
+        self.config_summary.setWordWrap(True)
+        config_layout.addWidget(self.config_summary);root.addWidget(config_box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
         self.analysis_state=QLabel("等待参数分析");self.analysis_state.setObjectName("analysisState")
@@ -164,6 +177,13 @@ class OperatorPlugin(Plugin):
         self.valid_analysis_signature=None;self.analysis_running_signature=None;self.analysis_mission=None;self.analysis_report=None;self.analysis_retry=0
         self.pick_mode="start";self.point_bridge=PointBridge();self.point_bridge.point_received.connect(self.apply_clicked_point)
         self.scene.currentIndexChanged.connect(self.update_defaults);self.start_sim.clicked.connect(self.launch_sim);self.stop_sim.clicked.connect(self.stop_simulation)
+        self.avoidance_mode.currentIndexChanged.connect(lambda _index:self.update_algorithm_controls())
+        self.dynamic_enabled.toggled.connect(lambda _checked:self.update_algorithm_controls())
+        for control in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude,
+                        self.orca_max_speed,self.orca_timeout):
+            control.valueChanged.connect(lambda _value:self.update_config_summary())
+        for control in (self.formation,self.perception_source):
+            control.currentIndexChanged.connect(lambda _index:self.update_config_summary())
         self.save_task_button.clicked.connect(self.save_task_preset)
         self.load_task_button.clicked.connect(self.load_task_preset)
         self.reset_task_button.clicked.connect(self.restore_task_defaults)
@@ -196,11 +216,44 @@ class OperatorPlugin(Plugin):
         self.risk_timer=QTimer(self.widget);self.risk_timer.setInterval(500)
         self.risk_timer.timeout.connect(self.check_dynamic_risk_age);self.risk_timer.start()
         self.update_defaults()
+        self.update_algorithm_controls()
     def update_defaults(self):
         self.clear_runtime_markers()
         sx,sy,gx,gy,alt=SCENE_DEFAULTS[self.scene.currentData()]
         for widget,value in ((self.start_x,sx),(self.start_y,sy),(self.goal_x,gx),(self.goal_y,gy),(self.altitude,alt)):widget.setValue(value)
-        QTimer.singleShot(50,self.publish_preview);self.schedule_analysis()
+        QTimer.singleShot(50,self.publish_preview);self.schedule_analysis();self.update_config_summary()
+    def update_algorithm_controls(self,_value=None):
+        algorithm=self.avoidance_mode.currentData()[0]
+        editable=(algorithm=='orca3d' and self.dynamic_enabled.isChecked() and
+                  not getattr(self,'simulation_start_pending',False) and
+                  (not hasattr(self,'process') or self.process.state()==QProcess.NotRunning))
+        self.orca_max_speed.setEnabled(editable)
+        self.orca_timeout.setEnabled(editable)
+        self.update_config_summary()
+    def configuration_provenance(self):
+        scene=int(self.scene.currentData())
+        if scene not in self.scene_identity_cache:
+            self.scene_identity_cache[scene]=scene_identity(self.package_path,scene)
+        algorithm=self.avoidance_mode.currentData()[0]
+        return {'source':dict(self.build_identity),
+                'scene':dict(self.scene_identity_cache[scene]),
+                'algorithm':algorithm_profile(algorithm)}
+    def update_config_summary(self,_value=None):
+        identity=self.configuration_provenance()
+        source=identity['source'];scene=identity['scene'];profile=identity['algorithm']
+        commit=source['git_commit']+('（工作区未提交）' if source['git_dirty'] else '')
+        algorithm=self.avoidance_mode.currentData()[0]
+        mode=(profile['label'] if self.dynamic_enabled.isChecked() else
+              '动态障碍已关闭，所选算法不会运行')
+        parameters=("；ORCA 限速 {:.1f} m/s、超时 {:.2f} s".format(
+            self.orca_max_speed.value(),self.orca_timeout.value()) if algorithm=='orca3d' else '')
+        self.config_summary.setText(
+            "Git {} · 包 {} · 场景 {} SHA-256 {}\n"
+            "下次启动：{}（{}）{}；感知 {}；队形 {}；高度 {:.1f} m；起点 ({:.1f},{:.1f}) → 终点 ({:.1f},{:.1f})\n{}".format(
+                commit,source['package_version'],scene['scene_id'],scene['world_sha256'][:12],
+                mode,profile['contract'],parameters,self.perception_source.currentData(),
+                self.formation.currentData(),self.altitude.value(),self.start_x.value(),
+                self.start_y.value(),self.goal_x.value(),self.goal_y.value(),profile['scope']))
     def task_configuration(self):
         return validate_task({'schema':1,'scene_id':int(self.scene.currentData()),
             'start_m':[self.start_x.value(),self.start_y.value()],
@@ -208,14 +261,17 @@ class OperatorPlugin(Plugin):
             'altitude_m':self.altitude.value(),'formation':str(self.formation.currentData()),
             'dynamic_obstacles':self.dynamic_enabled.isChecked(),
             'avoidance_mode':self.avoidance_mode.currentData()[0],
-            'perception_source':str(self.perception_source.currentData())})
+            'perception_source':str(self.perception_source.currentData()),
+            'orca_max_speed_mps':self.orca_max_speed.value(),
+            'orca_command_timeout_s':self.orca_timeout.value()})
     def task_configuration_locked(self):
         return self.process.state()!=QProcess.NotRunning or bool(self.active_runtime_processes())
     def apply_task_configuration(self,task):
         task=validate_task(task)
         controls=(self.scene,self.start_x,self.start_y,self.goal_x,self.goal_y,
                   self.altitude,self.formation,self.dynamic_enabled,
-                  self.avoidance_mode,self.perception_source)
+                  self.avoidance_mode,self.perception_source,
+                  self.orca_max_speed,self.orca_timeout)
         prior=[control.blockSignals(True) for control in controls]
         try:
             self.scene.setCurrentIndex(task['scene_id'])
@@ -230,9 +286,12 @@ class OperatorPlugin(Plugin):
                 if self.avoidance_mode.itemData(index)[0]==task['avoidance_mode']:
                     self.avoidance_mode.setCurrentIndex(index);break
             self.perception_source.setCurrentIndex(self.perception_source.findData(task['perception_source']))
+            self.orca_max_speed.setValue(task['orca_max_speed_mps'])
+            self.orca_timeout.setValue(task['orca_command_timeout_s'])
         finally:
             for control,was_blocked in zip(controls,prior):control.blockSignals(was_blocked)
         self.clear_runtime_markers();self.publish_preview();self.schedule_analysis()
+        self.update_algorithm_controls()
     def save_task_preset(self):
         path,_=QFileDialog.getSaveFileName(self.widget,"保存任务参数","mission_preset.json","JSON 文件 (*.json)")
         if not path:return
@@ -258,7 +317,8 @@ class OperatorPlugin(Plugin):
         self.apply_task_configuration({'schema':1,'scene_id':0,'start_m':[sx,sy],
             'goal_m':[gx,gy],'altitude_m':alt,'formation':'triangle',
             'dynamic_obstacles':True,'avoidance_mode':'collective_offset',
-            'perception_source':'perception'})
+            'perception_source':'perception',
+            'orca_max_speed_mps':2.0,'orca_command_timeout_s':0.6})
         self.state.setText("已恢复默认参数；等待重新规划")
     def export_operator_report(self):
         path,_=QFileDialog.getSaveFileName(self.widget,"导出上位机界面报告",
@@ -272,6 +332,7 @@ class OperatorPlugin(Plugin):
             report=build_operator_report(self.task_configuration(),planning,
                 self.latest_vehicle_snapshot,self.latest_risk_snapshot,
                 self.latest_energy_snapshot,self.event_journal.rows)
+            report['provenance']=self.configuration_provenance()
             write_json_atomic(path,report)
         except (OSError,TypeError,ValueError) as exc:
             QMessageBox.warning(self.widget,"导出失败",str(exc));return
@@ -462,6 +523,23 @@ class OperatorPlugin(Plugin):
         for code,message in mapping.items():
             if code in text:return message+"\n\n\u89c4\u5212\u5668\u4fe1\u606f\uff1a"+text
         return "\u822a\u7ebf\u89c4\u5212\u5931\u8d25\uff1a\n"+text
+    def simulation_launch_args(self,mission):
+        algorithm=self.avoidance_mode.currentData()[0]
+        profile=algorithm_profile(algorithm)
+        execution=profile['execution'] and self.dynamic_enabled.isChecked()
+        return ["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false",
+              "dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),
+              "dynamic_state_source:={}".format(self.perception_source.currentData()),
+              "dynamic_avoidance_execution:={}".format(str(execution).lower()),
+              "local_avoidance_algorithm:={}".format(algorithm),
+              "orca_control_mode:={}".format(profile['orca_mode']),
+              "orca_max_speed_mps:={:.1f}".format(self.orca_max_speed.value()),
+              "orca_command_timeout_s:={:.2f}".format(self.orca_timeout.value()),
+              "scene_id:={}".format(self.scene.currentData()),
+              "spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),
+              "goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),
+              "target_z:={}".format(self.altitude.value()),
+              "mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
     def launch_sim(self):
         if self.process.state()!=QProcess.NotRunning:QMessageBox.information(self.widget,"\u63d0\u793a","\u4eff\u771f\u5df2\u7ecf\u5728\u8fd0\u884c");return
         active=self.active_runtime_processes()
@@ -476,9 +554,9 @@ class OperatorPlugin(Plugin):
         preflight=self.preflight_errors()
         if preflight:
             QMessageBox.critical(self.widget,"启动条件不满足","启动前检查失败：\n- "+"\n- ".join(preflight));return
-        sid=self.scene.currentData();mission=self.analysis_mission
-        algorithm,orca_mode,execution=self.avoidance_mode.currentData()
-        self.clear_runtime_markers();self.cleanup_px4_sockets();args=["logistics_gazebo_sim","three_uav_mission.launch","gui:=true","auto_start:=false","dynamic_obstacles:={}".format(str(self.dynamic_enabled.isChecked()).lower()),"dynamic_state_source:={}".format(self.perception_source.currentData()),"dynamic_avoidance_execution:={}".format(str(execution).lower()),"local_avoidance_algorithm:={}".format(algorithm),"orca_control_mode:={}".format(orca_mode),"scene_id:={}".format(sid),"spawn_x:={}".format(self.start_x.value()),"spawn_y:={}".format(self.start_y.value()),"goal_x:={}".format(self.goal_x.value()),"goal_y:={}".format(self.goal_y.value()),"target_z:={}".format(self.altitude.value()),"mission_config:={}".format(mission),"gazebo_master_uri:=http://127.0.0.1:11460"]
+        mission=self.analysis_mission
+        self.clear_runtime_markers();self.cleanup_px4_sockets()
+        args=self.simulation_launch_args(mission)
         self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
         self.set_sensor_controls_enabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
@@ -499,16 +577,16 @@ class OperatorPlugin(Plugin):
     def simulation_process_started(self):
         self.state.setText("启动命令已提交，正在等待 Gazebo 与三机 PX4 就绪…")
     def simulation_process_error(self,_error):
-        self.set_sensor_controls_enabled(True)
         self.simulation_start_pending=False
+        self.set_sensor_controls_enabled(True)
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
         self.state.setText("仿真启动失败")
         QMessageBox.critical(self.widget,"仿真启动失败",
             "无法启动 roslaunch：{}\n请检查 ROS 环境和启动日志。".format(self.process.errorString()))
     def simulation_process_finished(self,exit_code,_exit_status):
+        self.simulation_start_pending=False
         self.set_sensor_controls_enabled(True)
         self.clear_runtime_markers()
-        self.simulation_start_pending=False
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())
         if self.simulation_stop_requested:
             self.state.setText("三机仿真已停止")
@@ -521,6 +599,7 @@ class OperatorPlugin(Plugin):
     def set_sensor_controls_enabled(self,enabled):
         for control in (self.perception_source,self.avoidance_mode,self.dynamic_enabled):
             control.setEnabled(enabled)
+        self.update_algorithm_controls()
 
     def stop_simulation(self):
         if self.process.state()==QProcess.NotRunning:
