@@ -166,17 +166,17 @@ class OperatorPlugin(Plugin):
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setWidget(self.widget)
         context.add_widget(self.scroll)
         self.process=QProcess(self.widget);self.analysis_process=QProcess(self.widget);self.simulation_log_tail=b""
-        self.process.setProcessChannelMode(QProcess.MergedChannels);self.process.readyReadStandardOutput.connect(self.drain_simulation_output)
+        self.process.setProcessChannelMode(QProcess.MergedChannels);self.process.readyReadStandardOutput.connect(lambda:self.drain_simulation_output())
         self.simulation_stop_requested=False;self.simulation_start_pending=False
-        self.process.started.connect(self.simulation_process_started)
-        self.process.errorOccurred.connect(self.simulation_process_error)
-        self.process.finished.connect(self.simulation_process_finished)
-        self.analysis_timer=QTimer(self.widget);self.analysis_timer.setSingleShot(True);self.analysis_timer.setInterval(700);self.analysis_timer.timeout.connect(self.start_analysis)
-        self.analysis_timeout=QTimer(self.widget);self.analysis_timeout.setSingleShot(True);self.analysis_timeout.setInterval(20000);self.analysis_timeout.timeout.connect(self.analysis_timed_out)
-        self.analysis_process.finished.connect(self.analysis_finished)
+        self.process.started.connect(lambda:self.simulation_process_started())
+        self.process.errorOccurred.connect(lambda error:self.simulation_process_error(error))
+        self.process.finished.connect(lambda code,status:self.simulation_process_finished(code,status))
+        self.analysis_timer=QTimer(self.widget);self.analysis_timer.setSingleShot(True);self.analysis_timer.setInterval(700);self.analysis_timer.timeout.connect(lambda:self.start_analysis())
+        self.analysis_timeout=QTimer(self.widget);self.analysis_timeout.setSingleShot(True);self.analysis_timeout.setInterval(20000);self.analysis_timeout.timeout.connect(lambda:self.analysis_timed_out())
+        self.analysis_process.finished.connect(lambda code,status:self.analysis_finished(code,status))
         self.valid_analysis_signature=None;self.analysis_running_signature=None;self.analysis_mission=None;self.analysis_report=None;self.analysis_retry=0
-        self.pick_mode="start";self.point_bridge=PointBridge();self.point_bridge.point_received.connect(self.apply_clicked_point)
-        self.scene.currentIndexChanged.connect(self.update_defaults);self.start_sim.clicked.connect(self.launch_sim);self.stop_sim.clicked.connect(self.stop_simulation)
+        self.pick_mode="start";self.point_bridge=PointBridge();self.point_bridge.point_received.connect(lambda x,y:self.apply_clicked_point(x,y),Qt.QueuedConnection)
+        self.scene.currentIndexChanged.connect(lambda _index:self.update_defaults());self.start_sim.clicked.connect(lambda:self.launch_sim());self.stop_sim.clicked.connect(lambda:self.stop_simulation())
         self.avoidance_mode.currentIndexChanged.connect(lambda _index:self.update_algorithm_controls())
         self.dynamic_enabled.toggled.connect(lambda _checked:self.update_algorithm_controls())
         for control in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude,
@@ -184,20 +184,26 @@ class OperatorPlugin(Plugin):
             control.valueChanged.connect(lambda _value:self.update_config_summary())
         for control in (self.formation,self.perception_source):
             control.currentIndexChanged.connect(lambda _index:self.update_config_summary())
-        self.save_task_button.clicked.connect(self.save_task_preset)
-        self.load_task_button.clicked.connect(self.load_task_preset)
-        self.reset_task_button.clicked.connect(self.restore_task_defaults)
-        self.export_report_button.clicked.connect(self.export_operator_report)
+        self.save_task_button.clicked.connect(lambda:self.save_task_preset())
+        self.load_task_button.clicked.connect(lambda:self.load_task_preset())
+        self.reset_task_button.clicked.connect(lambda:self.restore_task_defaults())
+        self.export_report_button.clicked.connect(lambda:self.export_operator_report())
         self.pick_start.clicked.connect(lambda:self.begin_pick("start"));self.pick_goal.clicked.connect(lambda:self.begin_pick("goal"))
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
         self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True)
         self.runtime_marker_pubs=[rospy.Publisher(topic,MarkerArray,queue_size=1,latch=True) for topic in ("/fleet/markers","/dynamic_obstacles/markers")]
         self.ros_subscribers=[]
         self.ros_subscribers.append(rospy.Subscriber("/clicked_point",PointStamped,self.clicked_point_cb,queue_size=1))
-        for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(self.parameters_changed)
-        self.formation.currentIndexChanged.connect(self.parameters_changed)
+        for spin in (self.start_x,self.start_y,self.goal_x,self.goal_y,self.altitude):spin.valueChanged.connect(lambda _value:self.parameters_changed())
+        self.formation.currentIndexChanged.connect(lambda _index:self.parameters_changed())
         self.perception_source.setToolTip("停止仿真后选择，下一次启动生效；仅切换数据源不会重新生成航线。")
-        self.ros_ui_bridge=RosUiBridge();self.ros_ui_bridge.state_received.connect(self.state_cb);self.ros_ui_bridge.diagnostics_received.connect(self.diag_cb);self.ros_ui_bridge.risk_received.connect(self.dynamic_risk_cb);self.ros_ui_bridge.perception_received.connect(self.perception_status_cb);self.ros_ui_bridge.energy_return_received.connect(self.energy_return_cb);self.ros_ui_bridge.telemetry_received.connect(self.operator_snapshot_cb)
+        self.ros_ui_bridge=RosUiBridge()
+        self.ros_ui_bridge.state_received.connect(lambda msg:self.state_cb(msg),Qt.QueuedConnection)
+        self.ros_ui_bridge.diagnostics_received.connect(lambda msg:self.diag_cb(msg),Qt.QueuedConnection)
+        self.ros_ui_bridge.risk_received.connect(lambda msg:self.dynamic_risk_cb(msg),Qt.QueuedConnection)
+        self.ros_ui_bridge.perception_received.connect(lambda msg:self.perception_status_cb(msg),Qt.QueuedConnection)
+        self.ros_ui_bridge.energy_return_received.connect(lambda msg:self.energy_return_cb(msg),Qt.QueuedConnection)
+        self.ros_ui_bridge.telemetry_received.connect(lambda msg:self.operator_snapshot_cb(msg),Qt.QueuedConnection)
         self.ros_subscribers.append(rospy.Subscriber("/fleet/mission_state",String,lambda msg:self.ros_ui_bridge.state_received.emit(msg),queue_size=1))
         self.ros_subscribers.append(rospy.Subscriber("/fleet/diagnostics",DiagnosticArray,lambda msg:self.ros_ui_bridge.diagnostics_received.emit(msg),queue_size=1))
         self.ros_subscribers.append(rospy.Subscriber("/fleet/dynamic_risk",String,lambda msg:self.ros_ui_bridge.risk_received.emit(msg),queue_size=1))
@@ -210,18 +216,18 @@ class OperatorPlugin(Plugin):
         self.event_journal=OperatorEventJournal()
         self.latest_vehicle_snapshot=None;self.latest_risk_snapshot=None;self.latest_energy_snapshot=None
         self.telemetry_timer=QTimer(self.widget);self.telemetry_timer.setInterval(1000)
-        self.telemetry_timer.timeout.connect(self.check_operator_snapshot_age);self.telemetry_timer.start()
+        self.telemetry_timer.timeout.connect(lambda:self.check_operator_snapshot_age());self.telemetry_timer.start()
         self.energy_timer=QTimer(self.widget);self.energy_timer.setInterval(500)
-        self.energy_timer.timeout.connect(self.check_energy_advisory_age);self.energy_timer.start()
+        self.energy_timer.timeout.connect(lambda:self.check_energy_advisory_age());self.energy_timer.start()
         self.risk_timer=QTimer(self.widget);self.risk_timer.setInterval(500)
-        self.risk_timer.timeout.connect(self.check_dynamic_risk_age);self.risk_timer.start()
+        self.risk_timer.timeout.connect(lambda:self.check_dynamic_risk_age());self.risk_timer.start()
         self.update_defaults()
         self.update_algorithm_controls()
     def update_defaults(self):
         self.clear_runtime_markers()
         sx,sy,gx,gy,alt=SCENE_DEFAULTS[self.scene.currentData()]
         for widget,value in ((self.start_x,sx),(self.start_y,sy),(self.goal_x,gx),(self.goal_y,gy),(self.altitude,alt)):widget.setValue(value)
-        QTimer.singleShot(50,self.publish_preview);self.schedule_analysis();self.update_config_summary()
+        QTimer.singleShot(50,lambda:self.publish_preview());self.schedule_analysis();self.update_config_summary()
     def update_algorithm_controls(self,_value=None):
         algorithm=self.avoidance_mode.currentData()[0]
         editable=(algorithm=='orca3d' and self.dynamic_enabled.isChecked() and
@@ -406,7 +412,7 @@ class OperatorPlugin(Plugin):
             is_environment=(diagnostic and diagnostic.get("category")=="ENVIRONMENT") or any(marker in detail for marker in environment_markers)
             if self.analysis_retry<3 and is_environment:
                 self.analysis_retry+=1;self.analysis_state.setText("环境异常，正在自动重试…")
-                self.analysis_detail.setText(detail[:320]);QTimer.singleShot(150,self.start_analysis);return
+                self.analysis_detail.setText(detail[:320]);QTimer.singleShot(150,lambda:self.start_analysis());return
             self.valid_analysis_signature=None;self.start_sim.setEnabled(False)
             if diagnostic:
                 names={"INPUT":"输入无效","FEASIBILITY":"任务不可行",
@@ -607,14 +613,14 @@ class OperatorPlugin(Plugin):
                 "[r]oslaunch.*three_uav_mission.launch"])
             if result==0:
                 self.state.setText("正在停止外部三机仿真…")
-                QTimer.singleShot(5000,self.force_stop_external_simulation)
+                QTimer.singleShot(5000,lambda:self.force_stop_external_simulation())
             else:
                 self.state.setText("没有检测到运行中的三机仿真")
             return
         self.simulation_stop_requested=True;self.state.setText("正在停止三机仿真…")
         try:os.killpg(int(self.process.processId()),signal.SIGINT)
         except (OSError,ProcessLookupError):self.process.terminate()
-        QTimer.singleShot(5000,self.force_stop_simulation)
+        QTimer.singleShot(5000,lambda:self.force_stop_simulation())
     def force_stop_simulation(self):
         if self.process.state()==QProcess.NotRunning:return
         try:os.killpg(int(self.process.processId()),signal.SIGTERM)
