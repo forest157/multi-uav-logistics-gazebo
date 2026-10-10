@@ -86,8 +86,15 @@ def build_operator_report(task, planning, vehicles, risk, energy, events):
         if not isinstance(event, dict) or any(not isinstance(event.get(key), str)
                                                for key in ('source', 'level', 'title', 'guidance')):
             raise ValueError('invalid event')
-        bounded_events.append({key: event[key][:320]
-                               for key in ('source', 'level', 'title', 'guidance')})
+        timestamp = event.get('time')
+        if (type(timestamp) not in (int, float) or not math.isfinite(timestamp) or
+                not 0 <= timestamp <= 253402300799):
+            raise ValueError('invalid event timestamp')
+        bounded = {key: event[key][:320]
+                   for key in ('source', 'level', 'title', 'guidance')}
+        bounded['time_unix_s'] = float(timestamp)
+        bounded['time_utc'] = datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+        bounded_events.append(bounded)
     return {'schema': 1, 'kind': 'operator_ui_snapshot',
             'generated_at_utc': datetime.now(timezone.utc).isoformat(),
             'scope': 'Read-only operator snapshot; not a flight safety audit or PX4 truth record.',

@@ -49,13 +49,15 @@ class OperatorTaskIOTest(unittest.TestCase):
         self.assertEqual(validate_task(shadow)['avoidance_mode'], 'distributed_mpc')
 
     def test_report_is_explicitly_ui_only_and_atomic(self):
-        event = {'source': '安全联锁', 'level': 'ERROR',
+        event = {'time': 1728604800.5, 'source': '安全联锁', 'level': 'ERROR',
                  'title': '安全联锁保持', 'guidance': '检查机间距'}
         report = build_operator_report(task(), {'approved': False,
             'status': '等待重新规划', 'detail': '旧规划已失效'}, None, None, None, [event])
         self.assertEqual(report['kind'], 'operator_ui_snapshot')
         self.assertFalse(report['planning']['approved'])
         self.assertIn('not a flight safety audit', report['scope'])
+        self.assertEqual(report['events'][0]['time_unix_s'], 1728604800.5)
+        self.assertEqual(report['events'][0]['time_utc'], '2024-10-11T00:00:00.500000+00:00')
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'report.json')
             write_json_atomic(path, report)
@@ -65,6 +67,15 @@ class OperatorTaskIOTest(unittest.TestCase):
                 write_json_atomic(path, {'invalid': math.nan})
             with open(path, encoding='utf-8') as stream:
                 self.assertEqual(json.load(stream)['kind'], 'operator_ui_snapshot')
+
+    def test_report_rejects_missing_or_nonfinite_event_time(self):
+        planning = {'approved': False, 'status': '等待重新规划'}
+        event = {'time': 1.0, 'source': '动态风险', 'level': 'WARN',
+                 'title': '数据过期', 'guidance': '检查感知节点'}
+        for invalid in (None, float('nan'), float('inf'), -1, 253402300800):
+            with self.subTest(timestamp=invalid), self.assertRaises(ValueError):
+                build_operator_report(task(), planning, None, None, None,
+                                      [dict(event, time=invalid)])
 
 
 if __name__ == '__main__':

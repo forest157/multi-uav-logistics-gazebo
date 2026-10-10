@@ -2,6 +2,7 @@
 
 import json
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -48,6 +49,27 @@ class OperatorQtBridgeTest(unittest.TestCase):
             app.exec_()
             self.assertEqual(plugin.vehicle_table.rowCount(), 1)
             self.assertEqual(plugin.vehicle_table.item(0, 0).text(), 'uav0')
+            with tempfile.TemporaryDirectory() as directory:
+                preset = os.path.join(directory, 'task.json')
+                report_path = os.path.join(directory, 'report.json')
+                with patch.object(module.QFileDialog, 'getSaveFileName', return_value=(preset, '')):
+                    plugin.save_task_button.click()
+                plugin.start_x.setValue(-38.0)
+                with patch.object(module.QFileDialog, 'getOpenFileName', return_value=(preset, '')):
+                    plugin.load_task_button.click()
+                self.assertEqual(plugin.start_x.value(), -39.0)
+                self.assertFalse(plugin.start_sim.isEnabled())
+                plugin.event_journal.planning_failure('FEASIBILITY', '规划失败',
+                                                     '检查净空', 1728604800.5)
+                with patch.object(module.QFileDialog, 'getSaveFileName',
+                                  return_value=(report_path, '')):
+                    plugin.export_report_button.click()
+                with open(report_path, encoding='utf-8') as stream:
+                    report = json.load(stream)
+                self.assertEqual(report['kind'], 'operator_ui_snapshot')
+                self.assertFalse(report['planning']['approved'])
+                self.assertEqual(report['events'][0]['time_utc'],
+                                 '2024-10-11T00:00:00.500000+00:00')
             plugin.analysis_timer.stop()
             plugin.analysis_timeout.stop()
             plugin.telemetry_timer.stop()
