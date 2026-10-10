@@ -17,7 +17,8 @@ from logistics_gazebo_sim.operator_event_journal import OperatorEventJournal
 from logistics_gazebo_sim.operator_task_io import (build_operator_report, load_task,
     validate_task, write_json_atomic)
 from logistics_gazebo_sim.operator_config_info import (algorithm_profile,
-    scene_identity, source_identity)
+    compare_runtime_configuration, requested_runtime_configuration,
+    RUNTIME_PARAMETER_LABELS, scene_identity, source_identity)
 from python_qt_binding.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QPixmap
 from python_qt_binding.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
@@ -90,7 +91,13 @@ class OperatorPlugin(Plugin):
         config_box=QGroupBox("版本与下次启动配置");config_layout=QVBoxLayout(config_box)
         self.config_summary=QLabel("正在读取源码与场景版本…")
         self.config_summary.setWordWrap(True)
-        config_layout.addWidget(self.config_summary);root.addWidget(config_box)
+        self.check_runtime_button=QPushButton("核对当前运行配置")
+        self.runtime_config_status=QLabel("尚未核对运行节点；此处的配置仅用于下次启动")
+        self.runtime_config_status.setWordWrap(True)
+        self.last_runtime_requested=None
+        config_layout.addWidget(self.config_summary)
+        config_layout.addWidget(self.check_runtime_button)
+        config_layout.addWidget(self.runtime_config_status);root.addWidget(config_box)
         self.start_sim.setObjectName("primary");self.stop_sim.setObjectName("secondary");self.start_sim.setToolTip("先校验参数并规划安全航线，再启动 Gazebo/PX4");self.start_sim.setEnabled(False)
         analysis=QGroupBox("规划分析");af=QVBoxLayout(analysis)
         self.analysis_state=QLabel("等待参数分析");self.analysis_state.setObjectName("analysisState")
@@ -188,6 +195,7 @@ class OperatorPlugin(Plugin):
         self.load_task_button.clicked.connect(lambda:self.load_task_preset())
         self.reset_task_button.clicked.connect(lambda:self.restore_task_defaults())
         self.export_report_button.clicked.connect(lambda:self.export_operator_report())
+        self.check_runtime_button.clicked.connect(lambda:self.check_runtime_configuration())
         self.pick_start.clicked.connect(lambda:self.begin_pick("start"));self.pick_goal.clicked.connect(lambda:self.begin_pick("goal"))
         self.start.clicked.connect(lambda:self.call("/fleet_mission_player/start"));self.pause.clicked.connect(lambda:self.call("/fleet_mission_player/pause"));self.resume.clicked.connect(lambda:self.call("/fleet_mission_player/resume"));self.reset.clicked.connect(lambda:self.call("/fleet_mission_player/reset"));self.land.clicked.connect(lambda:self.call("/fleet_mission_player/land"))
         self.preview_pub=rospy.Publisher("/operator/preview_markers",MarkerArray,queue_size=1,latch=True)
@@ -260,6 +268,37 @@ class OperatorPlugin(Plugin):
                 mode,profile['contract'],parameters,self.perception_source.currentData(),
                 self.formation.currentData(),self.altitude.value(),self.start_x.value(),
                 self.start_y.value(),self.goal_x.value(),self.goal_y.value(),profile['scope']))
+        if self.last_runtime_requested is not None and self.last_runtime_requested != self.requested_runtime_configuration():
+            self.last_runtime_requested=None
+            self.runtime_config_status.setText("下次启动参数已变化；请重新核对当前运行配置")
+    def requested_runtime_configuration(self):
+        return requested_runtime_configuration(
+            self.avoidance_mode.currentData()[0],self.dynamic_enabled.isChecked(),
+            self.orca_max_speed.value(),self.orca_timeout.value())
+    def check_runtime_configuration(self):
+        requested=self.requested_runtime_configuration()
+        try:
+            code,_message,uri=rospy.get_master().lookupNode('/fleet_mission_player')
+            if code!=1 or not uri:
+                raise ValueError('任务节点未在线')
+            running={name:rospy.get_param('/fleet_mission_player/'+name)
+                     for name in RUNTIME_PARAMETER_LABELS}
+            differences=compare_runtime_configuration(requested,running)
+        except Exception as exc:
+            self.last_runtime_requested=None
+            self.runtime_config_status.setText(
+                '无法核对当前运行配置：{}；请勿把下次启动参数视为当前生效参数'.format(str(exc)[:160]))
+            return
+        self.last_runtime_requested=requested
+        checked=time.strftime('%H:%M:%S',time.localtime())
+        if differences:
+            detail='；'.join('{}：界面 {} / 运行 {}'.format(
+                item['label'],item['requested'],item['running']) for item in differences)
+            self.runtime_config_status.setText(
+                '最近核对 {}：与界面下次启动配置不一致。{}。请以运行节点读回值为准。'.format(checked,detail))
+        else:
+            self.runtime_config_status.setText(
+                '最近核对 {}：运行节点与界面下次启动的算法及安全参数一致（只读参数核对，不代表飞行安全验收）。'.format(checked))
     def task_configuration(self):
         return validate_task({'schema':1,'scene_id':int(self.scene.currentData()),
             'start_m':[self.start_x.value(),self.start_y.value()],
@@ -564,6 +603,8 @@ class OperatorPlugin(Plugin):
         self.clear_runtime_markers();self.cleanup_px4_sockets()
         args=self.simulation_launch_args(mission)
         self.simulation_stop_requested=False;self.simulation_start_pending=True;self.start_sim.setEnabled(False)
+        self.last_runtime_requested=None
+        self.runtime_config_status.setText("新仿真启动中；任务节点就绪后请重新核对运行配置")
         self.set_sensor_controls_enabled(False)
         self.state.setText("规划成功，正在启动 Gazebo 与三机 PX4…")
         px4_root=os.path.expanduser("~/PX4_Firmware")
@@ -591,6 +632,8 @@ class OperatorPlugin(Plugin):
             "无法启动 roslaunch：{}\n请检查 ROS 环境和启动日志。".format(self.process.errorString()))
     def simulation_process_finished(self,exit_code,_exit_status):
         self.simulation_start_pending=False
+        self.last_runtime_requested=None
+        self.runtime_config_status.setText("仿真启动进程已退出；当前运行配置尚未重新核对")
         self.set_sensor_controls_enabled(True)
         self.clear_runtime_markers()
         self.start_sim.setEnabled(self.valid_analysis_signature==self.parameter_signature())

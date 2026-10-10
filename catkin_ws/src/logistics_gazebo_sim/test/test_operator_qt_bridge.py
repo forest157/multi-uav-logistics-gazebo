@@ -33,7 +33,8 @@ class OperatorQtBridgeTest(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         with patch.object(module.rospy, 'Publisher', side_effect=lambda *a, **k: _Sink()), \
                 patch.object(module.rospy, 'Subscriber', side_effect=lambda *a, **k: _Sink()), \
-                patch.object(module.rospy.Time, 'now', return_value=module.rospy.Time(0)):
+                patch.object(module.rospy.Time, 'now', return_value=module.rospy.Time(0)), \
+                patch.object(module.OperatorPlugin, 'active_runtime_processes', return_value=[]):
             plugin = module.OperatorPlugin(_Context())
             plugin.analysis_timer.stop()
             plugin.start_x.setValue(-39.0)
@@ -49,6 +50,27 @@ class OperatorQtBridgeTest(unittest.TestCase):
             app.exec_()
             self.assertEqual(plugin.vehicle_table.rowCount(), 1)
             self.assertEqual(plugin.vehicle_table.item(0, 0).text(), 'uav0')
+            running = plugin.requested_runtime_configuration()
+            with patch.object(module.rospy, 'get_master') as master, \
+                    patch.object(module.rospy, 'get_param',
+                                 side_effect=lambda name: running[name.rsplit('/', 1)[-1]]):
+                master.return_value.lookupNode.return_value = (1, 'online', 'http://127.0.0.1:1234')
+                plugin.check_runtime_button.click()
+            self.assertIn('参数一致', plugin.runtime_config_status.text())
+            plugin.orca_timeout.setValue(0.5)
+            self.assertIn('请重新核对', plugin.runtime_config_status.text())
+            plugin.orca_timeout.setValue(0.6)
+            with patch.object(module.rospy, 'get_master') as master, \
+                    patch.object(module.rospy, 'get_param',
+                                 side_effect=lambda name: dict(running,
+                                     local_avoidance_algorithm='orca3d')[name.rsplit('/', 1)[-1]]):
+                master.return_value.lookupNode.return_value = (1, 'online', 'http://127.0.0.1:1234')
+                plugin.check_runtime_button.click()
+            self.assertIn('不一致', plugin.runtime_config_status.text())
+            with patch.object(module.rospy, 'get_master') as master:
+                master.return_value.lookupNode.return_value = (-1, 'offline', '')
+                plugin.check_runtime_button.click()
+            self.assertIn('无法核对', plugin.runtime_config_status.text())
             with tempfile.TemporaryDirectory() as directory:
                 preset = os.path.join(directory, 'task.json')
                 report_path = os.path.join(directory, 'report.json')

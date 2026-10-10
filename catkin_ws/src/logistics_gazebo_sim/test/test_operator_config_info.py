@@ -4,7 +4,8 @@ import tempfile
 import unittest
 
 from logistics_gazebo_sim.operator_config_info import (
-    algorithm_profile, scene_identity, source_identity)
+    algorithm_profile, compare_runtime_configuration,
+    requested_runtime_configuration, scene_identity, source_identity)
 
 
 class OperatorConfigInfoTest(unittest.TestCase):
@@ -34,6 +35,23 @@ class OperatorConfigInfoTest(unittest.TestCase):
             self.assertEqual(source_identity(directory)['package_version'], '0.6.0')
             with self.assertRaises(ValueError):
                 scene_identity(directory, 7)
+
+    def test_runtime_readback_fails_closed_and_distinguishes_shadow(self):
+        collective = requested_runtime_configuration('collective_offset', True, 2.0, 0.6)
+        self.assertEqual(compare_runtime_configuration(collective, dict(collective)), [])
+        shadow = requested_runtime_configuration('distributed_mpc', True, 2.0, 0.6)
+        self.assertFalse(shadow['dynamic_avoidance_execution'])
+        self.assertEqual(shadow['orca_control_mode'], 'shadow')
+        differences = compare_runtime_configuration(collective, dict(collective,
+            local_avoidance_algorithm='orca3d', orca_control_mode='limited'))
+        self.assertEqual({item['parameter'] for item in differences},
+                         {'local_avoidance_algorithm', 'orca_control_mode'})
+        for invalid in (dict(collective, dynamic_avoidance_execution='true'),
+                        dict(collective, orca_max_speed_mps=float('nan')),
+                        {key: value for key, value in collective.items()
+                         if key != 'orca_command_timeout_s'}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                compare_runtime_configuration(collective, invalid)
 
 
 if __name__ == '__main__':
